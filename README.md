@@ -53,7 +53,7 @@ This is a GUI wrapper for the [LLaDA model](https://github.com/ML-GSAI/LLaDA), a
 1. Clone this repository:
    ```
    git clone https://github.com/angrysky56/llada-gui.git
-   cd llada-gui
+   cd llada_gui_new
    ```
 
 2. Use the provided installation script:
