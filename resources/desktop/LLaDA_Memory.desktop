@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LLaDA GUI with Memory
+Comment=LLaDA GUI with integrated cognitive memory
+Exec=/home/ty/Repositories/ai_workspace/llada_gui_new/run.sh
+Icon=text-editor
+Terminal=false
+Categories=Development;Science;AI;
+Keywords=AI;LLM;Diffusion;Memory;

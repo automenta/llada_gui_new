@@ -1,0 +1,15 @@
+[Unit]
+Description=MCP Titan Memory Server
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /home/ty/Repositories/ai_workspace/llada_gui_new/core/memory/memory_server/server.js
+WorkingDirectory=/home/ty/Repositories/ai_workspace/llada_gui_new/core/memory/memory_server
+Restart=on-failure
+User=ty
+Environment=PORT=3000
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

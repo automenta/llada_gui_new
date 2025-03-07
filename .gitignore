@@ -1,0 +1,130 @@
+# Python-related files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environment
+/venv/
+/env/
+ENV/
+.venv/
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
+memory_server.pid
+
+# Model files
+/GSAI-ML_LLaDA-8B-Instruct/
+*.model
+*.pt
+*.bin
+*.safetensors
+*.ggml
+*.gguf
+
+# Model directories
+/data/models/
+/data/models/GSAI-ML_LLaDA-8B-Instruct/
+/data/models/onnx_models/
+
+# Data and memory files
+/data/memory/*
+!/data/memory/.gitkeep
+
+# Vector database files
+/data/memory/vector_db/*.npy
+/data/memory/vector_db/metadata.json
+/data/memory/vector_db/DB_INITIALIZED
+
+# Memory model files
+/core/memory/memory_data/titan_memory_model.json
+
+# Configuration to exclude but allow specific ones
+*.json
+!mcp-config.json
+!package.json
+!package-lock.json
+!core/memory/vector_db_config.json
+!core/memory/memory_server/package.json
+!core/memory/memory_server/package-lock.json
+
+# Generated desktop files
+/*.desktop
+
+# Project-specific temporary files
+/archive/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.*
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# TensorFlow and PyTorch save files
+*.ckpt
+*.pth
+*.pb
+*.tflite
+
+# Node.js modules (for memory server)
+node_modules/
+core/memory/memory_server/node_modules/
+
+# Compiled files
+*.pyc
+*.pyo
+*.so
+*.o
+*.obj
+*.dll
+*.exe
+*.out
+
+# System-specific files
+.DS_Store
+Thumbs.db
+*.pid
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Allow specific configuration files
+!requirements.txt
+!requirements_memory.txt

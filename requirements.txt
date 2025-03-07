@@ -1,0 +1,13 @@
+transformers==4.38.2
+torch>=2.0.0
+PyQt6
+numpy
+bitsandbytes
+onnx
+onnxruntime-gpu
+onnxruntime
+psutil
+tqdm
+accelerate
+huggingface_hub
+requests
