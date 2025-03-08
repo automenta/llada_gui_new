@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtOpenGL import QOpenGLVersionProfile, QSurfaceFormat
 
 from OpenGL.GL import *  # pylint: disable=W0614,W0611
+from OpenGL import GLU  # Import GLU for gluDisk
 
 
 # Import default parameters
@@ -33,11 +34,17 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.object = 0
         self.visualization_type = "Token Stream" # Default visualization type
         self.token_stream_data = [] # Placeholder for token stream data
+        self.color_scheme = "Cool" # Default color scheme
 
     def set_visualization_type(self, viz_type):
         """Set the current visualization type."""
         self.visualization_type = viz_type
         self.update() # Trigger repaint
+
+    def set_color_scheme(self, scheme):
+        """Set the color scheme for visualizations."""
+        self.color_scheme = scheme
+        self.update()
 
     def set_token_stream_data(self, data):
         """Set data for token stream visualization."""
@@ -58,11 +65,16 @@ class GLVisualizationWidget(QOpenGLWidget):
     def paintGL(self):
         """Paint the OpenGL scene."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glEnable(GL_BLEND) # Enable blending for smooth circles
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) # Standard alpha blending
 
         if self.visualization_type == "Token Stream":
             self.draw_token_stream()
-        else:
+        elif self.visualization_type == "Test Square":
             self.draw_test_square() # Default or fallback visualization
+
+        glDisable(GL_BLEND) # Disable blending when done
+
 
     def draw_test_square(self):
         """Draw a simple colored square for testing."""
@@ -76,28 +88,49 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def draw_token_stream(self):
         """Draw the Token Stream visualization."""
-        glColor3f(0.8, 0.8, 0.8)  # Light gray for tokens
         num_tokens = 20 # Example number of tokens to display
         spacing = 0.1
         start_x = - (num_tokens - 1) * spacing / 2 # Center tokens
 
         for i in range(num_tokens):
             x = start_x + i * spacing
-            y = 0 # Center vertically
-            size = 0.05 + (i % 5) * 0.01 # Varying size for effect
+            y = (i % 3) * 0.03 - 0.1 # Slight vertical wave
+            size = 0.04 + (i % 5) * 0.005 # Even smaller size variation
 
-            # Example dynamic color - could be based on token data later
-            hue = (i * 30) % 360 / 360.0
-            color = QColor.fromHslF(hue, 1.0, 0.5)
-            glColor3f(color.redF(), color.greenF(), color.blueF())
+            # Get color based on scheme
+            color = self.get_token_color(i, num_tokens)
+            glColor4f(color.redF(), color.greenF(), color.blueF(), 0.8) # Slightly transparent
+
+            # Draw smooth circle using gluDisk
+            glPushMatrix() # Prepare transformation matrix for each token
+            glTranslatef(x, y, 0.0) # Translate to token position
+            gluDisk(
+                quad=gluNewQuadric(), # Create quadric object
+                innerRadius=0,
+                outerRadius=size,
+                slices=32, # Smooth circle
+                loops=32
+            )
+            glPopMatrix() # Restore transformation
 
 
-            glBegin(GL_QUADS)
-            glVertex2f(x - size, y - size)
-            glVertex2f(x + size, y - size)
-            glVertex2f(x + size, y + size)
-            glVertex2f(x - size, y + size)
-            glEnd()
+    def get_token_color(self, index, total_tokens):
+        """Get color for token based on color scheme."""
+        hue = (index * 360 / total_tokens) % 360 / 360.0 # Hue progression
+
+        if self.color_scheme == "Cool":
+            # Cool scheme - blues and greens
+            return QColor.fromHslF(hue * 0.5 + 0.5, 0.9, 0.6) # Shift hue to cool range
+        elif self.color_scheme == "Warm":
+            # Warm scheme - reds and oranges
+            return QColor.fromHslF(hue * 0.3, 0.9, 0.6) # Shift hue to warm range
+        elif self.color_scheme == "GrayScale":
+            # Gray scale - simple gray based on index
+            gray_val = 1.0 - (index / total_tokens) * 0.8 # Lighter to darker gray
+            return QColor.fromRgbF(gray_val, gray_val, gray_val)
+        else:
+            # Default - rainbow/full spectrum
+            return QColor.fromHslF(hue, 0.9, 0.6)
 
 
     def resizeGL(self, width, height):
@@ -316,8 +349,9 @@ class LLaDAGUINew(QMainWindow):
 
         # Color Scheme Selection (Example Parameter)
         self.color_scheme_combo = QComboBox()
-        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale"]) # Example schemes
-        self.color_scheme_combo.currentTextChanged.connect(lambda text: print(f"Color Scheme changed: {text}")) # Placeholder
+        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale", "Rainbow"]) # Example schemes - added Rainbow
+        self.color_scheme_combo.setCurrentText("Cool") # Set default color scheme
+        self.color_scheme_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
         viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
         viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
 
