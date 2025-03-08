@@ -46,6 +46,9 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.token_shape = "Circle" # Default token shape
         self.token_size = 0.03 # Default token size
         self.token_spacing = 0.07 # Default token spacing
+        self.zoom_level = 1.0 # Default zoom level
+        self.pan_x = 0.0 # Default pan X
+        self.pan_y = 0.0 # Default pan Y
 
 
     def set_visualization_type(self, viz_type):
@@ -83,6 +86,17 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.token_spacing = spacing
         self.update()
 
+    def set_zoom_level(self, zoom):
+        """Set the zoom level for visualization."""
+        self.zoom_level = zoom
+        self.update()
+
+    def set_pan(self, pan_x, pan_y):
+        """Set the pan values for visualization."""
+        self.pan_x = pan_x
+        self.pan_y = pan_y
+        self.update()
+
 
     def initializeGL(self):
         """Initialize OpenGL context and settings."""
@@ -101,12 +115,24 @@ class GLVisualizationWidget(QOpenGLWidget):
         glEnable(GL_BLEND) # Enable blending for smooth shapes
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) # Standard alpha blending
 
+        # Setup zoom and pan transformations
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(-1 * self.zoom_level + self.pan_x, 1 * self.zoom_level + self.pan_x,
+                -1 * self.zoom_level + self.pan_y, 1 * self.zoom_level + self.pan_y, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+
+
         self.animation_time += self.animation_speed # Increment animation time
 
         if self.visualization_type == "Token Stream":
             self.draw_token_stream()
         elif self.visualization_type == "Test Square":
             self.draw_test_square() # Default or fallback visualization
+        elif self.visualization_type == "Memory Influence Map":
+            self.draw_memory_influence_map()
+        elif self.visualization_type == "Abstract Token Cloud":
+            self.draw_abstract_token_cloud()
 
         glDisable(GL_BLEND) # Disable blending when done
 
@@ -173,6 +199,48 @@ class GLVisualizationWidget(QOpenGLWidget):
 
             glPopMatrix() # Restore transformation
 
+    def draw_memory_influence_map(self):
+        """Placeholder for Memory Influence Map visualization."""
+        glColor3f(0.5, 0.5, 0.8) # Light purple for placeholder
+        glBegin(GL_QUADS)
+        glVertex2f(-0.8, -0.8)
+        glVertex2f(0.8, -0.8)
+        glVertex2f(0.8, 0.8)
+        glVertex2f(-0.8, 0.8)
+        glEnd()
+        # Add text or shapes to indicate it's a placeholder
+        glColor3f(1.0, 1.0, 1.0) # White text
+        self.render_text(0, 0, "Memory Influence Map (Placeholder)")
+
+
+    def draw_abstract_token_cloud(self):
+        """Placeholder for Abstract Token Cloud visualization."""
+        glColor3f(0.3, 0.7, 0.5) # Greenish for placeholder
+        glBegin(GL_TRIANGLES)
+        glVertex2f(-0.6, -0.6)
+        glVertex2f(0.6, -0.6)
+        glVertex2f(0.0, 0.6)
+        glEnd()
+        # Add text or shapes to indicate it's a placeholder
+        glColor3f(1.0, 1.0, 1.0) # White text
+        self.render_text(0, 0, "Abstract Token Cloud (Placeholder)")
+
+
+    def render_text(self, x, y, text, font_size=16):
+        """Helper to render text in OpenGL - basic implementation."""
+        # Note: This is a very basic text rendering, consider using proper text rendering for better quality
+        from PyQt6.QtGui import QFont, QColor
+        from PyQt6.QtWidgets import QApplication
+
+        font = QFont("Arial", font_size)
+        color = QColor(255, 255, 255) # White
+
+        # Get current context and painter from QApplication
+        context = QApplication.instance()
+
+        # Use renderText with world coordinates
+        self.renderText(x, y, 0, text, font)
+
 
     def get_token_color(self, index, total_tokens):
         """Get color for token based on color scheme."""
@@ -203,6 +271,17 @@ class GLVisualizationWidget(QOpenGLWidget):
         glLoadIdentity()
         glOrtho(-1, 1, -1, 1, -1, 1) # Orthographic projection
         glMatrixMode(GL_MODELVIEW)
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel event for zoom."""
+        zoom_factor = 0.05 # Zoom sensitivity
+        delta = event.angleDelta().y()
+        if delta > 0: # Zoom in
+            self.zoom_level *= (1.0 - zoom_factor)
+        elif delta < 0: # Zoom out
+            self.zoom_level *= (1.0 + zoom_factor)
+        self.zoom_level = max(0.1, min(self.zoom_level, 5.0)) # Clamp zoom level
+        self.update() # Trigger repaint
 
 
 class LLaDAGUINew(QMainWindow):
@@ -401,26 +480,26 @@ class LLaDAGUINew(QMainWindow):
         viz_settings_layout.addWidget(QLabel("Type:"), 0, 0)
         viz_settings_layout.addWidget(self.visualization_type_combo, 0, 1)
 
-        # Color Scheme Selection (Example Parameter)
+        # Color Scheme Selection
         self.color_scheme_combo = QComboBox()
-        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale", "Rainbow"]) # Example schemes - added Rainbow
-        self.color_scheme_combo.setCurrentText("Cool") # Set default color scheme
+        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale", "Rainbow"])
+        self.color_scheme_combo.setCurrentText("Cool")
         self.color_scheme_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
         viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
         viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
 
         # Token Shape Selection
         self.token_shape_combo = QComboBox()
-        self.token_shape_combo.addItems(["Circle", "Square", "Triangle", "Line"]) # Added "Line" shape
-        self.token_shape_combo.setCurrentText("Circle") # Default shape
+        self.token_shape_combo.addItems(["Circle", "Square", "Triangle", "Line"])
+        self.token_shape_combo.setCurrentText("Circle")
         self.token_shape_combo.currentTextChanged.connect(self.opengl_viz_widget.set_token_shape)
         viz_settings_layout.addWidget(QLabel("Token Shape:"), 2, 0)
         viz_settings_layout.addWidget(self.token_shape_combo, 2, 1)
 
         # Animation Speed Control
         self.animation_speed_spin = QDoubleSpinBox()
-        self.animation_speed_spin.setRange(0.001, 0.1) # Example range
-        self.animation_speed_spin.setValue(0.01) # Default speed
+        self.animation_speed_spin.setRange(0.001, 0.1)
+        self.animation_speed_spin.setValue(0.01)
         self.animation_speed_spin.setSingleStep(0.005)
         self.animation_speed_spin.valueChanged.connect(self.opengl_viz_widget.set_animation_speed)
         viz_settings_layout.addWidget(QLabel("Animation Speed:"), 3, 0)
@@ -443,6 +522,15 @@ class LLaDAGUINew(QMainWindow):
         self.token_spacing_spin.valueChanged.connect(self.opengl_viz_widget.set_token_spacing)
         viz_settings_layout.addWidget(QLabel("Token Spacing:"), 5, 0)
         viz_settings_layout.addWidget(self.token_spacing_spin, 5, 1)
+
+        # Zoom Level Control - Example for future zoom control
+        self.zoom_level_spin = QDoubleSpinBox()
+        self.zoom_level_spin.setRange(0.1, 5.0)
+        self.zoom_level_spin.setValue(1.0)
+        self.zoom_level_spin.setSingleStep(0.1)
+        self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level)
+        viz_settings_layout.addWidget(QLabel("Zoom Level:"), 6, 0)
+        viz_settings_layout.addWidget(self.zoom_level_spin, 6, 1)
 
 
         viz_settings_group.setLayout(viz_settings_layout)
