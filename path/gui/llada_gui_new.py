@@ -274,22 +274,88 @@ class LLaDAGUINew(QMainWindow):
 
         # Model & Hardware 🧠
         model_group = QGroupBox("🧠 Model & Hardware")
-        model_layout = QVBoxLayout()
-        model_layout.addWidget(QLabel("Model/Hardware Options Here"))  # Placeholder
+        model_layout = QGridLayout()
+
+        # Device Selection
+        device_layout = QHBoxLayout()
+        self.cpu_radio = QRadioButton("CPU")
+        self.gpu_radio = QRadioButton("GPU (CUDA)")
+        self.device_group = QButtonGroup()
+        self.device_group.addButton(self.cpu_radio)
+        self.device_group.addButton(self.gpu_radio)
+        self.cpu_radio.toggled.connect(lambda checked: print(f"Device CPU selected: {checked}))")) # Placeholder
+        self.gpu_radio.toggled.connect(lambda checked: print(f"Device GPU selected: {checked}))")) # Placeholder
+        device_layout.addWidget(self.cpu_radio)
+        device_layout.addWidget(self.gpu_radio)
+        model_layout.addWidget(QLabel("Device:"), 0, 0)
+        model_layout.addLayout(device_layout, 0, 1)
+
+        # Precision Options
+        precision_layout = QHBoxLayout()
+        self.normal_precision_radio = QRadioButton("Normal")
+        self.quant_8bit_radio = QRadioButton("8-bit")
+        self.quant_4bit_radio = QRadioButton("4-bit")
+        self.precision_group = QButtonGroup()
+        self.precision_group.addButton(self.normal_precision_radio)
+        self.precision_group.addButton(self.quant_8bit_radio)
+        self.precision_group.addButton(self.quant_4bit_radio)
+        self.normal_precision_radio.toggled.connect(lambda checked: print(f"Precision Normal selected: {checked}))")) # Placeholder
+        self.quant_8bit_radio.toggled.connect(lambda checked: print(f"Precision 8-bit selected: {checked}))")) # Placeholder
+        self.quant_4bit_radio.toggled.connect(lambda checked: print(f"Precision 4-bit selected: {checked}))")) # Placeholder
+        precision_layout.addWidget(self.normal_precision_radio)
+        precision_layout.addWidget(self.quant_8bit_radio)
+        precision_layout.addWidget(self.quant_4bit_radio)
+        model_layout.addWidget(QLabel("Precision:"), 1, 0)
+        model_layout.addLayout(precision_layout, 1, 1)
+
+        # Extreme Mode Checkbox
+        self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
+        self.extreme_mode_checkbox.toggled.connect(lambda checked: print(f"Extreme Mode selected: {checked}))")) # Placeholder
+        model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
+
+        # Fast Mode Checkbox
+        self.fast_mode_checkbox = QCheckBox("Fast Mode")
+        self.fast_mode_checkbox.toggled.connect(lambda checked: print(f"Fast Mode selected: {checked}))")) # Placeholder
+        model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
+
+
         model_group.setLayout(model_layout)
         self.sidebar_layout.addWidget(model_group)
 
         # Memory Integration 💾
         memory_group = QGroupBox("💾 Memory Integration")
         memory_layout = QVBoxLayout()
-        memory_layout.addWidget(QLabel("Memory Options Here"))  # Placeholder
+
+        # Enable Memory Integration Checkbox
+        self.enable_memory_checkbox = QCheckBox("Enable Memory Integration")
+        self.enable_memory_checkbox.toggled.connect(lambda checked: print(f"Memory Integration enabled: {checked}")) # Placeholder
+        memory_layout.addWidget(self.enable_memory_checkbox)
+
+        # Memory Server Status Label
+        self.memory_server_status_label = QLabel("Memory Server Status: Unknown") # Initial status
+        memory_layout.addWidget(self.memory_server_status_label)
+
+
         memory_group.setLayout(memory_layout)
         self.sidebar_layout.addWidget(memory_group)
 
         # Realtime Statistics 📊
         stats_group = QGroupBox("📊 Realtime Statistics")
-        stats_layout = QVBoxLayout()
-        stats_layout.addWidget(QLabel("Statistics Display Here"))  # Placeholder
+        stats_layout = QGridLayout()
+
+        # Token Rate Display
+        self.token_rate_label = QLabel("Token Rate: - tokens/s")
+        stats_layout.addWidget(self.token_rate_label, 0, 0)
+
+        # Step Time Display
+        self.step_time_label = QLabel("Step Time: - ms/step")
+        stats_layout.addWidget(self.step_time_label, 1, 0)
+
+        # Detailed Memory Usage Display (Placeholder - expandable later)
+        self.detailed_memory_label = QLabel("Memory Usage: - ")
+        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
+
+
         stats_group.setLayout(stats_layout)
         self.sidebar_layout.addWidget(stats_group)
 
@@ -321,6 +387,7 @@ class LLaDAGUINew(QMainWindow):
 
     def get_generation_config(self):
         """Get the current generation configuration from UI elements."""
+        device = 'cuda' if self.gpu_radio.isChecked() and torch.cuda.is_available() else 'cpu'
         return {
             'gen_length': self.gen_length_spin.value(),
             'steps': self.steps_spin.value(),
@@ -328,11 +395,11 @@ class LLaDAGUINew(QMainWindow):
             'temperature': self.temperature_spin.value(),
             'cfg_scale': self.cfg_scale_spin.value(),
             'remasking': self.remasking_combo.currentText(),
-            'device': 'cuda' if True else 'cpu', # Placeholder device selection
-            'use_8bit': False, # Placeholder quantization
-            'use_4bit': False, # Placeholder quantization
-            'extreme_mode': False, # Placeholder extreme mode
-            'use_memory': False # Memory integration placeholder
+            'device': device,
+            'use_8bit': self.use_8bit.isChecked() and device == 'cuda',
+            'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
+            'extreme_mode': self.extreme_mode_checkbox.isChecked(),
+            'use_memory': self.enable_memory_checkbox.isChecked()
         }
 
     @pyqtSlot()
@@ -348,7 +415,7 @@ class LLaDAGUINew(QMainWindow):
         # Disable UI elements and enable stop button
         self.set_ui_generating(True)
 
-        # Create worker thread and connect signals (PLACEHOLDER connections for now)
+        # Create worker thread and connect signals
         self.worker = LLaDAWorker(prompt_text, config) # Pass config
         self.worker.progress.connect(self.update_progress) # Connect progress signal
         self.worker.step_update.connect(self.update_visualization) # Connect step_update
@@ -371,14 +438,17 @@ class LLaDAGUINew(QMainWindow):
 
     @pyqtSlot(int, list, list, list)
     def update_visualization(self, step, tokens, masks, confidences):
-        """Update visualization during each step (PLACEHOLDER)."""
-        # Placeholder for updating OpenGL visualization
-        print(f"Step {step} - received visualization data (PLACEHOLDER)")
+        """Update visualization during each step."""
+        # For now, just print step info to console - replace with OpenGL viz update later
+        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
+        # self.opengl_viz_widget.set_token_stream_data(tokens) # Example of sending data to OpenGL widget
 
     @pyqtSlot(str)
     def generation_finished(self, output_text):
         """Handle generation finished signal."""
         self.status_bar.showMessage("Generation Finished")
+        # For now, print output to console - replace with proper output display later
+        print(f"Generated Output: {output_text}")
         self.prompt_input.setPlainText(output_text) # Just for testing, replace with proper output display later
         self.set_ui_generating(False) # Re-enable UI
 
