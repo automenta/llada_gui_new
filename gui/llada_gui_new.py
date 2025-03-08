@@ -184,6 +184,7 @@ class GLVisualizationWidget(QOpenGLWidget):
                 color = self.adjust_color_alpha(color, 0.5 + confidence * 0.5)
 
             text_to_render = self.token_stream_data_strings[i] if self.token_stream_data_mode == "Decoded Tokens" else str(self.token_stream_data_strings[i])
+
             self.draw_shape(shape, x - self.token_spacing * 0.3, y - self.token_size * 2, size, color)
             self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, text_to_render, QColor(200, 200, 220), font_size=10)
 
@@ -279,7 +280,7 @@ class GLVisualizationWidget(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
-            if image_data:
+            if image_
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
             self.text_textures[text] = texture_id
             self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
@@ -339,9 +340,8 @@ class LLaDAGUINew(QMainWindow):
         self.token_stream_data_mode = "Decoded Tokens"
 
         self.cleanup_timer = QTimer(self)
-        self.cleanup_timer.timeout.connect(self.cleanup_gpu_memory)
+        self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory) # Changed to _delayed_cleanup_gpu_memory
         self.gpu_cleanup_delay = 5 * 60 * 1000  # 5 minutes delay
-        
         self.keep_gpu_loaded = False
 
         self.setup_ui()
@@ -639,36 +639,37 @@ class LLaDAGUINew(QMainWindow):
 
     def start_gpu_cleanup_timer(self):
         """Starts the GPU cleanup timer with a delay."""
-        if self.gpu_cleanup_timer.isActive():
+        if self.cleanup_timer.isActive(): # Use self.cleanup_timer here
             print("GPU cleanup timer already active, stopping and restarting.") # DEBUG
-            self.gpu_cleanup_timer.stop() # Stop any existing timer
+            self.cleanup_timer.stop() # Stop any existing timer
         print("Starting GPU cleanup timer.") # DEBUG
-        self.gpu_cleanup_timer.start(self.gpu_cleanup_delay)
+        self.cleanup_timer.start(self.gpu_cleanup_delay)
         self.status_bar.showMessage("GPU memory cleanup scheduled in 5 minutes...")
 
     def cancel_gpu_cleanup_timer(self):
         """Cancels the GPU cleanup timer if it's active."""
-        if self.gpu_cleanup_timer.isActive():
+        if self.cleanup_timer.isActive(): # Use self.cleanup_timer here
             print("Cancelling GPU cleanup timer.") # DEBUG
-            self.gpu_cleanup_timer.stop()
+            self.cleanup_timer.stop()
             self.status_bar.showMessage("GPU memory cleanup cancelled.")
         else:
             print("GPU cleanup timer is not active, nothing to cancel.") # DEBUG
 
-    def cleanup_gpu_memory(self):
-        """Initiates GPU memory cleanup (to be implemented in LLaDAWorker or core)."""
-        print("cleanup_gpu_memory() called. self.keep_gpu_loaded:", self.keep_gpu_loaded) # DEBUG
-        if self.keep_gpu_loaded: # Do not cleanup if user wants to keep GPU loaded
-            print("GPU cleanup skipped because 'Keep GPU Loaded' is checked.") # DEBUG
+    @pyqtSlot()
+    def _delayed_cleanup_gpu_memory(self): # Changed to _delayed_cleanup_gpu_memory
+        """Initiates GPU memory cleanup via worker signal."""
+        print("_delayed_cleanup_gpu_memory() timer event. self.keep_gpu_loaded:", self.keep_gpu_loaded) # DEBUG
+        if self.keep_gpu_loaded: # Do not cleanup if user wants to keep GPU loaded - double check here as well
+            print("GPU cleanup skipped due to 'Keep GPU Loaded' setting on timer event.") # DEBUG
             return
         self.status_bar.showMessage("Initiating GPU memory cleanup...")
         if self.worker:
-            print("Calling worker.cleanup_memory_async()") # DEBUG
-            self.worker.cleanup_memory_async() # Assuming LLaDAWorker has this method now. Non-blocking cleanup.
+            print("Emitting cleanup_memory_signal to worker from timer.") # DEBUG
+            self.worker.cleanup_memory_signal.emit() # Emit signal to worker to perform cleanup
         else:
-            print("Warning: No worker to cleanup memory.") # Fallback in case worker is None
-            self.status_bar.showMessage("Warning: No worker to cleanup memory.")
-        print("cleanup_gpu_memory() finished.") # DEBUG
+            print("Warning: No worker to signal for cleanup on timer event.") # Fallback in case worker is None
+            self.status_bar.showMessage("Warning: No worker to signal for cleanup.")
+        print("_delayed_cleanup_gpu_memory() finished.") # DEBUG
 
 
     @pyqtSlot()
@@ -681,7 +682,7 @@ class LLaDAGUINew(QMainWindow):
 
         config = self.get_generation_config()
         self.set_ui_generating(True)
-        self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup
+        self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup on new generate request
         print(f"on_generate_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
         self.worker = LLaDAWorker(prompt_text, config) # Create new worker for each generate click
         self.worker.progress.connect(self.update_progress)
@@ -690,6 +691,7 @@ class LLaDAGUINew(QMainWindow):
         self.worker.error.connect(self.generation_error)
         self.worker.realtime_stats.connect(self.update_realtime_stats_display)
         self.worker.memory_influence_update.connect(self.opengl_viz_widget.set_memory_influence_data)
+        self.worker.cleanup_memory_signal.connect(self._delayed_cleanup_gpu_memory) # Connect signal to timer slot in main thread!
         self.worker.start()
 
     @pyqtSlot()
@@ -707,10 +709,10 @@ class LLaDAGUINew(QMainWindow):
         """Updates the progress status in the status bar."""
         self.status_bar.showMessage(f"Generating - {message}")
 
-    @pyqtSlot(int, list, list, list, list)
-    def update_visualization(self, step, tokens, masks, confidences, token_ids):
+    @pyqtSlot(int, list, list, list, list, list) # Added step_confidences to slot signature
+    def update_visualization(self, step, tokens, masks, confidences, token_ids, step_confidences): # Added step_confidences
         """Updates the OpenGL visualization based on generation step data."""
-        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
+        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}..., Step Confidences: {step_confidences[:2]}...") # Added step_confidences to debug print
         if self.opengl_viz_widget.visualization_type == "Token Stream":
             data_to_visualize = tokens if self.token_stream_data_mode == "Decoded Tokens" else token_ids
             self.opengl_viz_widget.set_token_stream_data(data_to_visualize, masks, confidences, self.token_stream_data_mode)
@@ -865,7 +867,7 @@ class LLaDAGUINew(QMainWindow):
         self.memory_monitor.stop()
         self.cancel_gpu_cleanup_timer()
         if not self.keep_gpu_loaded:
-            self.cleanup_gpu_memory()
+            self._delayed_cleanup_gpu_memory() # Call delayed cleanup on close as well, to be safe
         event.accept()
 
 

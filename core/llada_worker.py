@@ -32,6 +32,7 @@ class LLaDAWorker(QThread):
     memory_warning = pyqtSignal(str)
     realtime_stats = pyqtSignal(dict) # Signal for realtime stats
     memory_influence_update = pyqtSignal(np.ndarray) # Signal for memory influence data
+    cleanup_memory_signal = pyqtSignal() # Add this signal
 
     def __init__(self, prompt: str, config: Dict[str, Any], parent: Optional[Any] = None): # Type hints
         super().__init__(parent)
@@ -41,9 +42,6 @@ class LLaDAWorker(QThread):
         self.current_step = 0
         self.total_steps = config.get('steps', 64)
         self.mask_id = 126336  # Default mask token ID - Consider making configurable via config
-        self.cleanup_timer = QTimer(self)
-        self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory)
-        self.memory_cleanup_delay = config.get('memory_cleanup_delay', 300000) # Default 5 minutes in milliseconds
         self.generation_mode = GenerationMode.STANDARD # Default to STANDARD mode
         self.last_step_time = None
         self.step_times = []
@@ -54,8 +52,6 @@ class LLaDAWorker(QThread):
     def stop(self):
         """Stop the generation process."""
         self.stopped = True
-        if self.cleanup_timer.isActive():
-            self.cleanup_timer.stop() # Stop timer if generation is stopped
 
     def update_progress(self, progress_percentage: float, tokens: Optional[torch.Tensor] = None):
         """
@@ -176,19 +172,15 @@ class LLaDAWorker(QThread):
         model = None # Initialize model and tokenizer outside try block for broader scope
         tokenizer = None
         try:
-            # Stop any existing timer in case of rapid re-generation requests
-            if self.cleanup_timer.isActive():
-                self.cleanup_timer.stop()
-            else:
-                # Determine device
-                device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
-                self.progress.emit(5, f"Starting with device: {device}", {})
+            # Determine device
+            device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
+            self.progress.emit(5, f"Starting with device: {device}", {})
 
-                if device == 'cuda':
-                    cleanup_gpu_memory() # REMOVED immediate cleanup - this was the cause of premature cleanup
-                    free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
-                    if free_memory < MEMORY_WARNING_THRESHOLD_GB:
-                        self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
+            if device == 'cuda':
+                cleanup_gpu_memory()
+                free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
+                if free_memory < MEMORY_WARNING_THRESHOLD_GB:
+                    self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
 
             model_path = get_model_path()
 
@@ -257,18 +249,14 @@ class LLaDAWorker(QThread):
             self.progress.emit(100, "Generation complete", {'output': answer})
             self.finished.emit(answer)
 
-            # Start the delayed cleanup timer after successful generation
-            if device == 'cuda':
-                self.cleanup_timer.start(self.memory_cleanup_delay)
+            # Signal the main thread to perform cleanup (delayed, via timer)
+            if not self.stopped:
+                self.cleanup_memory_signal.emit()
 
 
         except Exception as e:
             logger.error(f"Unhandled exception: {e}")
             self.error.emit(format_error(e))
-            if self.cleanup_timer.isActive():
-                self.cleanup_timer.stop() # Stop timer in case of error
-
-        # finally block removed - cleanup is now handled by timer
 
 
     def _load_model_and_tokenizer(self, model_path: str, device: str) -> tuple[AutoTokenizer, AutoModel]:
@@ -278,14 +266,27 @@ class LLaDAWorker(QThread):
             tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=True, cache_dir="data")
             if hasattr(tokenizer, 'mask_token_id') and tokenizer.mask_token_id is not None:
                 self.mask_id = tokenizer.mask_token_id # Update mask_id from tokenizer if available
-            # tokenizer.mask_token_id = tokenizer.mask_token_id or MASK_TOKEN_ID_DEFAULT # Alternative default setting
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+
             self.progress.emit(15, f"Loading model (device: {device})...", {})
             dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
             model = AutoModel.from_pretrained(
                 model_path, trust_remote_code=True, torch_dtype=dtype,
                 device_map="auto" if device == 'cuda' else None, cache_dir="data"
             )
-            #model.tie_weights()  # Explicitly tie weights
+
+            # Resize embeddings for special tokens if needed
+            if len(tokenizer) > model.config.vocab_size:
+                print("Resizing model embeddings to fit tokenizer vocabulary")
+                model.resize_token_embeddings(len(tokenizer))
+            # Try tying weights, but handle potential errors
+            try:
+                model.tie_weights()
+            except AttributeError as e:
+                print(f"Warning: Could not tie weights: {e}")
+
+
             if device == 'cpu':
                 model = model.to('cpu')
             model.eval() # Ensure eval mode
@@ -319,22 +320,50 @@ class LLaDAWorker(QThread):
             self.error.emit(error_msg)
             return None # Indicate input preparation failure
 
-    def _delayed_cleanup_gpu_memory(self):
-        """Perform delayed GPU memory cleanup."""
-        logger.info("Performing delayed GPU memory cleanup...")
-        cleanup_gpu_memory()
-        self.cleanup_timer.stop() # Ensure timer is stopped after cleanup
-
 
     def cleanup_memory_async(self):
         """Asynchronously cleans up GPU memory."""
-        print("Initiating GPU memory cleanup...")
+        print("Initiating GPU memory cleanup from worker thread...")
         # --- Replace these placeholders with your actual memory cleanup code ---
         if hasattr(self, 'model'):
             del self.model
             self.model = None # Or reload a lightweight version if needed for quick start
+            print("Model removed from worker.")
         torch.cuda.empty_cache() # Clear CUDA cache
         # --- End of placeholder cleanup code ---
         mem_stats = self.get_memory_usage()
-        print(f"GPU memory usage post cleanup: {mem_stats['gpu_used']:.2f}GB / {mem_stats['gpu_total']:.2f}GB")
-        self.update_memory_signal.emit(mem_stats) # Update memory monitor if you have this signal
+        print(f"GPU memory usage post cleanup (worker thread): {mem_stats['gpu_used']:.2f}GB / {mem_stats['gpu_total']:.2f}GB")
+        # self.update_memory_signal.emit(mem_stats) # Do not emit signal back to GUI from worker cleanup
+        print("GPU cleanup in worker thread complete.")
+
+    def get_memory_usage(self): # Dummy implementation for now
+        """Returns dummy memory usage statistics."""
+        if torch.cuda.is_available():
+            gpu_used = torch.cuda.memory_allocated(0) / (1024 ** 3)
+            gpu_reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+            gpu_total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            gpu_percent = (gpu_used / gpu_total) * 100
+            system_used = 10 # Dummy values
+            system_total = 32 # Dummy values
+            system_percent = (system_used / system_total) * 100
+            return {
+                'gpu_used': gpu_used,
+                'gpu_reserved': gpu_reserved,
+                'gpu_total': gpu_total,
+                'gpu_percent': gpu_percent,
+                'system_used': system_used,
+                'system_total': system_total,
+                'system_percent': system_percent,
+                'gpu_available': True
+            }
+        else:
+            return {
+                'gpu_used': 0,
+                'gpu_reserved': 0,
+                'gpu_total': 0,
+                'gpu_percent': 0,
+                'system_used': 0,
+                'system_total': 0,
+                'system_percent': 0,
+                'gpu_available': False
+            }
