@@ -111,7 +111,7 @@ class LLaDAWorker(QThread):
             self.progress.emit(5, f"Starting with device: {device}", {})
 
             if device == 'cuda':
-                cleanup_gpu_memory()
+                # cleanup_gpu_memory() # REMOVED immediate cleanup - this was the cause of premature cleanup
                 free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
                 if free_memory < MEMORY_WARNING_THRESHOLD_GB:
                     self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
