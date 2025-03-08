@@ -8,7 +8,7 @@ import sys
 import random
 
 import torch
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -24,8 +24,10 @@ from OpenGL import GLU  # Import GLU for gluDisk
 import numpy as np
 
 
-# Import default parameters
+# Import our modules with updated paths
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
+from core.llada_worker import LLaDAWorker
+from core.utils import format_error
 
 
 class GLVisualizationWidget(QOpenGLWidget):
@@ -163,6 +165,9 @@ class LLaDAGUINew(QMainWindow):
         self.setWindowTitle("LLaDA GUI - OpenGL Viz - Prototype")
         self.resize(1200, 900)  # Slightly larger initial size
 
+        # Worker thread reference
+        self.worker = None
+
         # Main widget and layout
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
@@ -198,9 +203,9 @@ class LLaDAGUINew(QMainWindow):
 
         # Add Generate and Stop buttons to status bar
         self.generate_button_status_bar = QPushButton("Generate")
-        self.generate_button_status_bar.clicked.connect(self.on_generate_clicked) # Placeholder function
+        self.generate_button_status_bar.clicked.connect(self.on_generate_clicked)
         self.stop_button_status_bar = QPushButton("Stop")
-        self.stop_button_status_bar.clicked.connect(self.on_stop_clicked) # Placeholder function
+        self.stop_button_status_bar.clicked.connect(self.on_stop_clicked)
         self.stop_button_status_bar.setEnabled(False) # Initially disabled
 
         self.status_bar.addPermanentWidget(self.generate_button_status_bar)
@@ -222,7 +227,6 @@ class LLaDAGUINew(QMainWindow):
         self.gen_length_spin.setRange(16, 512)
         self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length'])
         self.gen_length_spin.setSingleStep(16)
-        self.gen_length_spin.valueChanged.connect(lambda value: print(f"Generation Length changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Length:"), 0, 0)
         generation_layout.addWidget(self.gen_length_spin, 0, 1)
 
@@ -231,7 +235,6 @@ class LLaDAGUINew(QMainWindow):
         self.steps_spin.setRange(16, 512)
         self.steps_spin.setValue(DEFAULT_PARAMS['steps'])
         self.steps_spin.setSingleStep(16)
-        self.steps_spin.valueChanged.connect(lambda value: print(f"Sampling Steps changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Steps:"), 1, 0)
         generation_layout.addWidget(self.steps_spin, 1, 1)
 
@@ -240,7 +243,6 @@ class LLaDAGUINew(QMainWindow):
         self.block_length_spin.setRange(16, 256)
         self.block_length_spin.setValue(DEFAULT_PARAMS['block_length'])
         self.block_length_spin.setSingleStep(16)
-        self.block_length_spin.valueChanged.connect(lambda value: print(f"Block Length changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Block Size:"), 2, 0)
         generation_layout.addWidget(self.block_length_spin, 2, 1)
 
@@ -249,7 +251,6 @@ class LLaDAGUINew(QMainWindow):
         self.temperature_spin.setRange(0, 2)
         self.temperature_spin.setValue(DEFAULT_PARAMS['temperature'])
         self.temperature_spin.setSingleStep(0.1)
-        self.temperature_spin.valueChanged.connect(lambda value: print(f"Temperature changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Temperature:"), 3, 0)
         generation_layout.addWidget(self.temperature_spin, 3, 1)
 
@@ -258,7 +259,6 @@ class LLaDAGUINew(QMainWindow):
         self.cfg_scale_spin.setRange(0, 5)
         self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale'])
         self.cfg_scale_spin.setSingleStep(0.1)
-        self.cfg_scale_spin.valueChanged.connect(lambda value: print(f"CFG Scale changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("CFG Scale:"), 4, 0)
         generation_layout.addWidget(self.cfg_scale_spin, 4, 1)
 
@@ -266,7 +266,6 @@ class LLaDAGUINew(QMainWindow):
         self.remasking_combo = QComboBox()
         self.remasking_combo.addItems(["low_confidence", "random"])
         self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
-        self.remasking_combo.currentTextChanged.connect(lambda text: print(f"Remasking Strategy changed: {text}")) # Placeholder
         generation_layout.addWidget(QLabel("Remasking:"), 5, 0)
         generation_layout.addWidget(self.remasking_combo, 5, 1)
 
@@ -320,17 +319,82 @@ class LLaDAGUINew(QMainWindow):
         # Add stretch to bottom to push groups to the top
         self.sidebar_layout.addStretch(1)
 
-    def on_generate_clicked(self):
-        """Placeholder for Generate button click."""
-        print("Generate button clicked!")
-        self.generate_button_status_bar.setEnabled(False)
-        self.stop_button_status_bar.setEnabled(True)
+    def get_generation_config(self):
+        """Get the current generation configuration from UI elements."""
+        return {
+            'gen_length': self.gen_length_spin.value(),
+            'steps': self.steps_spin.value(),
+            'block_length': self.block_length_spin.value(),
+            'temperature': self.temperature_spin.value(),
+            'cfg_scale': self.cfg_scale_spin.value(),
+            'remasking': self.remasking_combo.currentText(),
+            'device': 'cuda' if True else 'cpu', # Placeholder device selection
+            'use_8bit': False, # Placeholder quantization
+            'use_4bit': False, # Placeholder quantization
+            'extreme_mode': False, # Placeholder extreme mode
+            'use_memory': False # Memory integration placeholder
+        }
 
+    @pyqtSlot()
+    def on_generate_clicked(self):
+        """Handle Generate button click: start generation."""
+        prompt_text = self.prompt_input.toPlainText().strip()
+        if not prompt_text:
+            QMessageBox.warning(self, "Input Error", "Please enter a prompt.")
+            return
+
+        config = self.get_generation_config()
+
+        # Disable UI elements and enable stop button
+        self.set_ui_generating(True)
+
+        # Create worker thread and connect signals (PLACEHOLDER connections for now)
+        self.worker = LLaDAWorker(prompt_text, config) # Pass config
+        self.worker.progress.connect(self.update_progress) # Connect progress signal
+        self.worker.step_update.connect(self.update_visualization) # Connect step_update
+        self.worker.finished.connect(self.generation_finished) # Connect finished signal
+        self.worker.error.connect(self.generation_error) # Connect error signal
+        self.worker.start() # Start the worker thread
+
+    @pyqtSlot()
     def on_stop_clicked(self):
-        """Placeholder for Stop button click."""
-        print("Stop button clicked!")
-        self.generate_button_status_bar.setEnabled(True)
-        self.stop_button_status_bar.setEnabled(False)
+        """Handle Stop button click: stop generation."""
+        if self.worker and self.worker.isRunning():
+            self.worker.stop()
+            self.set_ui_generating(False) # Re-enable UI, keep stop disabled
+
+    @pyqtSlot(int, str, dict)
+    def update_progress(self, progress_percent, message, data):
+        """Update progress bar and status message during generation."""
+        self.status_bar.showMessage(f"Generating - {message}")
+        # Placeholder for progress bar update if we add one to status bar
+
+    @pyqtSlot(int, list, list, list)
+    def update_visualization(self, step, tokens, masks, confidences):
+        """Update visualization during each step (PLACEHOLDER)."""
+        # Placeholder for updating OpenGL visualization
+        print(f"Step {step} - received visualization data (PLACEHOLDER)")
+
+    @pyqtSlot(str)
+    def generation_finished(self, output_text):
+        """Handle generation finished signal."""
+        self.status_bar.showMessage("Generation Finished")
+        self.prompt_input.setPlainText(output_text) # Just for testing, replace with proper output display later
+        self.set_ui_generating(False) # Re-enable UI
+
+    @pyqtSlot(str)
+    def generation_error(self, error_message):
+        """Handle generation error signal."""
+        self.status_bar.showMessage(f"Generation Error: {error_message}")
+        QMessageBox.critical(self, "Generation Error", f"Error: {error_message}")
+        self.set_ui_generating(False) # Re-enable UI
+
+    def set_ui_generating(self, is_generating):
+        """Enable/disable UI elements based on generation status."""
+        self.generate_button_status_bar.setEnabled(not is_generating)
+        self.stop_button_status_bar.setEnabled(is_generating)
+        self.prompt_input.setEnabled(not is_generating)
+        # ... (Add other UI elements to disable as needed)
 
 
 def main():
