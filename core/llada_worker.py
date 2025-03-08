@@ -26,7 +26,7 @@ MEMORY_WARNING_THRESHOLD_GB = 1.0
 class LLaDAWorker(QThread):
     """Worker thread for handling LLaDA generation."""
     progress = pyqtSignal(int, str, dict)
-    step_update = pyqtSignal(int, list, list, list, list) # Added token_ids to signal
+    step_update = pyqtSignal(int, list, list, list, list, list) # Added step_confidences to signal
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
     memory_warning = pyqtSignal(str)
@@ -48,6 +48,7 @@ class LLaDAWorker(QThread):
         self.last_step_time = None
         self.step_times = []
         self.tokenizer = None # Store tokenizer instance
+        self.step_confidences = [] # To store step confidences
 
 
     def stop(self):
@@ -94,7 +95,7 @@ class LLaDAWorker(QThread):
             token_ids = tokens[0].cpu().tolist()
             mask_indices = [1 if t == self.mask_id else 0 for t in token_ids]
             token_display = ["[MASK]" if t == self.mask_id else str(t) for t in token_ids] # List comprehension
-            confidence_scores = [0.0 if m else 1.0 for m in mask_indices]
+            confidence_scores = [0.0 if m else 1.0 for m in mask_indices] # Initial confidence scores (can be refined later)
             mask_indices_bool = [bool(m) for m in mask_indices] # List comprehension
 
             # Decode token IDs to strings for better visualization
@@ -107,13 +108,18 @@ class LLaDAWorker(QThread):
                     # Handle empty decoded tokens (e.g., beginning of sequence tokens)
                     token_display_strings.append(decoded_token if decoded_token else "[UNK]")
 
+            # Get current step's confidence scores from stored list
+            current_step_confidences = []
+            if self.step_confidences and len(self.step_confidences) > 0:
+                current_step_confidences = self.step_confidences[-1].tolist()[0] # Get last step's confidences, convert to list
 
             self.step_update.emit(
                 self.current_step,
                 token_display_strings, # Use decoded token strings
                 mask_indices_bool,
-                confidence_scores,
-                token_ids # Send token IDs as well
+                confidence_scores, # Initial confidence scores
+                token_ids, # Send token IDs as well
+                current_step_confidences # Send per-step confidence scores
             )
         except Exception as e:
             logger.error(f"Error in step update: {e}")
@@ -229,16 +235,17 @@ class LLaDAWorker(QThread):
             # Initialize step timing
             self.last_step_time = time.time()
             self.step_times = []
-
+            self.step_confidences = [] # Initialize step_confidences list here
 
             # Generate text
-            out = generate(
+            out, step_confidences_tensor = generate( # Capture step_confidences
                 model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
                 block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
                 remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
                 mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size,
                 confidence_threshold=confidence_threshold
             )
+            self.step_confidences = [step_confidences_tensor[i, :, :] for i in range(step_confidences_tensor.shape[0])] # Store step confidences
 
             if self.stopped:
                 self.error.emit("Generation cancelled.")

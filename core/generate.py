@@ -10,7 +10,7 @@ This version implements several optimizations:
 """
 
 import logging
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 
 import numpy as np
 import torch
@@ -237,7 +237,7 @@ def select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
 
 def _process_generation_step(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
                              memory_integration, temperature, remasking, step,
-                             num_transfer_tokens, block_start, block_end, mask_index):
+                             num_transfer_tokens, block_start, block_end, mask_index) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]: # Return confidence
     """Helper function to process a single generation step within a block."""
 
     # Model processing and guidance
@@ -264,7 +264,7 @@ def _process_generation_step(model, x, cfg_scale, chunk_size, mask_id, prompt_in
 
     # Select and transfer tokens
     transfer_index = select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
-    return x0, transfer_index
+    return x0, transfer_index, confidence # Return confidence
 
 
 @torch.no_grad()
@@ -340,6 +340,7 @@ def generate(
 
     total_steps_expected = steps if not adaptive_steps else sum(steps_per_block_list)
     total_steps_completed = 0
+    all_step_confidences: List[torch.Tensor] = [] # List to store step confidences
 
     for num_block in range(num_blocks):
         steps_per_block = steps_per_block_list[num_block] if adaptive_steps else steps_per_block
@@ -357,6 +358,7 @@ def generate(
             torch.div(block_mask_index.sum(dim=1, keepdim=True), steps_per_block, rounding_mode='floor').repeat(1, steps_per_block)
         )
 
+        step_confidences_block: List[torch.Tensor] = [] # Store confidences for this block
         for i in range(steps_per_block):
             x = token_buffer.data  # Automatically moves to GPU if needed
 
@@ -368,11 +370,12 @@ def generate(
                 break
 
             # Process generation step in helper function
-            x0, transfer_index = _process_generation_step(
+            x0, transfer_index, confidence = _process_generation_step( # Get confidence here
                 model, x, cfg_scale, chunk_size, mask_id, prompt_index,
                 memory_integration, temperature, remasking, i,
                 num_transfer_tokens, block_start, block_end, mask_index
             )
+            step_confidences_block.append(confidence.clone().cpu()) # Store confidence for this step
 
             # Update token buffer and mask
             x[transfer_index] = x0[transfer_index]
@@ -389,9 +392,12 @@ def generate(
 
         if cpu_offload:
             gpu_offload_to_cpu(token_buffer)
+        all_step_confidences.extend(step_confidences_block) # Collect confidences from each block
 
     token_buffer.to_gpu()
-    return token_buffer.data
+    # Stack confidences along step dimension after generation
+    step_confidences_tensor = torch.stack(all_step_confidences, dim=0) if all_step_confidences else torch.empty(0)
+    return token_buffer.data, step_confidences_tensor # Return tokens and confidences
 
 
 def gpu_offload_to_cpu(token_buffer):
