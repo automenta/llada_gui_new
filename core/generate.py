@@ -67,6 +67,7 @@ class TokenBuffer:
         return TokenBuffer(self._data.clone(), self.device, self.cpu_offload)
 
 
+@torch.jit.script
 def add_gumbel_noise(logits: torch.Tensor, temperature: float) -> torch.Tensor:
     """
     Add Gumbel noise for sampling categorical distributions.
@@ -267,6 +268,7 @@ def _process_generation_step(model, x, cfg_scale, chunk_size, mask_id, prompt_in
     return x0, transfer_index, confidence # Return confidence
 
 
+@torch.compile
 @torch.no_grad()
 def generate(
     model,
