@@ -8,7 +8,7 @@ import sys
 
 import torch
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence
+from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QSpinBox, QComboBox, QGroupBox,
@@ -16,9 +16,51 @@ from PyQt6.QtWidgets import (
     QScrollArea, QDoubleSpinBox, QTabWidget, QRadioButton, QButtonGroup,
     QSizePolicy, QStatusBar, QOpenGLWidget, QVBoxLayout
 )
+from PyQt6.QtOpenGL import QOpenGLVersionProfile, QSurfaceFormat
+
+from OpenGL.GL import *  # pylint: disable=W0614,W0611
 
 # Import default parameters
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
+
+
+class GLVisualizationWidget(QOpenGLWidget):
+    """OpenGL widget for visualization."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.object = 0
+
+    def initializeGL(self):
+        """Initialize OpenGL context and settings."""
+        version_profile = QOpenGLVersionProfile()
+        version_profile.setVersion(4, 1)  # Request OpenGL 4.1 - adjust if needed
+        format_ = QSurfaceFormat()
+        format_.setVersion(4, 1)
+        format_.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        QSurfaceFormat.setDefaultFormat(format_)
+
+        glClearColor(0.1, 0.1, 0.2, 1.0) # Dark background
+
+    def paintGL(self):
+        """Paint the OpenGL scene."""
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        # Simple colored square for testing
+        glBegin(GL_QUADS)
+        glColor3f(1.0, 1.0, 0.0) # Yellow color
+        glVertex2f(-0.5, -0.5)
+        glVertex2f(0.5, -0.5)
+        glVertex2f(0.5, 0.5)
+        glVertex2f(-0.5, 0.5)
+        glEnd()
+
+    def resizeGL(self, width, height):
+        """Handle viewport resizing."""
+        glViewport(0, 0, width, height)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(-1, 1, -1, 1, -1, 1) # Orthographic projection
+        glMatrixMode(GL_MODELVIEW)
 
 
 class LLaDAGUINew(QMainWindow):
@@ -43,7 +85,7 @@ class LLaDAGUINew(QMainWindow):
         main_layout.addLayout(viz_sidebar_layout)
 
         # 2.1. OpenGL Visualization Widget (Left)
-        self.opengl_viz_widget = QOpenGLWidget()  # Placeholder for OpenGL Widget
+        self.opengl_viz_widget = GLVisualizationWidget()  # Use the new OpenGL widget
         viz_sidebar_layout.addWidget(self.opengl_viz_widget)
 
         # 2.2. Sidebar (Right - Scrollable)
@@ -130,8 +172,44 @@ class LLaDAGUINew(QMainWindow):
 
         # Model & Hardware 🧠
         model_group = QGroupBox("🧠 Model & Hardware")
-        model_layout = QVBoxLayout()
-        model_layout.addWidget(QLabel("Model/Hardware Options Here"))  # Placeholder
+        model_layout = QGridLayout()
+
+        # Device Selection
+        device_layout = QHBoxLayout()
+        self.cpu_radio = QRadioButton("CPU")
+        self.gpu_radio = QRadioButton("GPU (CUDA)")
+        self.device_group = QButtonGroup()
+        self.device_group.addButton(self.cpu_radio)
+        self.device_group.addButton(self.gpu_radio)
+        device_layout.addWidget(self.cpu_radio)
+        device_layout.addWidget(self.gpu_radio)
+        model_layout.addWidget(QLabel("Device:"), 0, 0)
+        model_layout.addLayout(device_layout, 0, 1)
+
+        # Precision Options
+        precision_layout = QHBoxLayout()
+        self.normal_precision_radio = QRadioButton("Normal")
+        self.quant_8bit_radio = QRadioButton("8-bit")
+        self.quant_4bit_radio = QRadioButton("4-bit")
+        self.precision_group = QButtonGroup()
+        self.precision_group.addButton(self.normal_precision_radio)
+        self.precision_group.addButton(self.quant_8bit_radio)
+        self.precision_group.addButton(self.quant_4bit_radio)
+        precision_layout.addWidget(self.normal_precision_radio)
+        precision_layout.addWidget(self.quant_8bit_radio)
+        precision_layout.addWidget(self.quant_4bit_radio)
+        model_layout.addWidget(QLabel("Precision:"), 1, 0)
+        model_layout.addLayout(precision_layout, 1, 1)
+
+        # Extreme Mode Checkbox
+        self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
+        model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
+
+        # Fast Mode Checkbox
+        self.fast_mode_checkbox = QCheckBox("Fast Mode")
+        model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
+
+
         model_group.setLayout(model_layout)
         self.sidebar_layout.addWidget(model_group)
 
