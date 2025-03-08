@@ -567,7 +567,7 @@ class LLaDAGUINew(QMainWindow):
         return {
             'gen_length': self.gen_length_spin.value(), 'steps': self.steps_spin.value(), 'block_length': self.block_length_spin.value(),
             'temperature': self.temperature_spin.value(), 'cfg_scale': self.cfg_scale_spin.value(), 'remasking': self.remasking_combo.currentText(),
-            'device': device, 'use_8bit': self.use_8bit.isChecked() and device == 'cuda', 'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
+            'device': device,
             'extreme_mode': self.extreme_mode_checkbox.isChecked(), 'fast_mode': self.fast_mode_checkbox.isChecked(),
             'use_memory': self.enable_memory_checkbox.isChecked()
         }
@@ -667,8 +667,8 @@ class LLaDAGUINew(QMainWindow):
             self.token_size_spin, self.token_spacing_spin,
             self.token_data_mode_combo, self.gen_length_spin, self.steps_spin,
             self.block_length_spin, self.temperature_spin, self.cfg_scale_spin,
-            self.remasking_combo, self.cpu_radio, self.gpu_radio, self.use_normal,
-            self.use_8bit, self.use_4bit, self.extreme_mode_checkbox, self.fast_mode_checkbox,
+            self.remasking_combo, self.cpu_radio, self.gpu_radio,
+            self.extreme_mode_checkbox, self.fast_mode_checkbox,
             self.enable_memory_checkbox, self.show_prob_bar_checkbox,
             self.keep_gpu_loaded_checkbox
         ]
@@ -719,7 +719,7 @@ class LLaDAGUINew(QMainWindow):
         self.gpu_vram_label_sidebar.setText(f"{gpu_used:.2f} / {gpu_total:.2f} GB ({gpu_percent:.0f}%)" if gpu_available else "N/A")
 
     def save_settings(self):
-        settings = QSettings("LLaDA_GUI", "LLaDA_GUI")
+        settings = QSettings("LLaDA_GUI")
         s = settings.setValue
         s("visualization_type", self.visualization_type_combo.currentText())
         s("color_scheme", self.color_scheme_combo.currentText())
@@ -734,8 +734,6 @@ class LLaDAGUINew(QMainWindow):
         s("cfg_scale", self.cfg_scale_spin.value())
         s("remasking", self.remasking_combo.currentText())
         s("device", "cuda" if self.gpu_radio.isChecked() else "cpu")
-        s("use_8bit", self.use_8bit.isChecked())
-        s("use_4bit", self.use_4bit.isChecked())
         s("extreme_mode", self.extreme_mode_checkbox.isChecked())
         s("fast_mode", self.fast_mode_checkbox.isChecked())
         s("use_memory", self.enable_memory_checkbox.isChecked())
@@ -744,7 +742,7 @@ class LLaDAGUINew(QMainWindow):
         s("keep_gpu_loaded", self.keep_gpu_loaded_checkbox.isChecked())
 
     def load_settings(self):
-        settings = QSettings("LLaDA_GUI", "LLaDA_GUI")
+        settings = QSettings("LLaDA_GUI")
         self.visualization_type_combo.setCurrentText(settings.value("visualization_type", "Token Stream"))
         self.color_scheme_combo.setCurrentText(settings.value("color_scheme", "Cool"))
         self.token_shape_combo.setCurrentText(settings.value("token_shape", "Circle"))
@@ -774,8 +772,6 @@ class LLaDAGUINew(QMainWindow):
         if not self.keep_gpu_loaded:
             self._delayed_cleanup_gpu_memory() # Call delayed cleanup on close as well, to be safe
         event.accept()
-
-
 
 def main():
     app = QApplication(sys.argv)
