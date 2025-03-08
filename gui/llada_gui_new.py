@@ -265,7 +265,7 @@ class LladaVis(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
-            if image_data:
+            if image_
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
             self.text_textures[text] = texture_id
             self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
@@ -372,7 +372,7 @@ class LLaDAGUINew(QMainWindow):
         self.add_widget_to_grid(viz_settings_layout, "Animation Speed:", self.animation_speed_spin, 3, 0)
 
         self.token_size_spin = self.spinboxGrid("Token Size", 4, viz_settings_layout, self.vis.set_token_size, 0.03, 0.01, 0.1, 0.005)
-        self.token_spacing_spin = self.spinboxGrid("Token Spacing", 5, viz_settings_layout, self.vis.set_token_spacing, 0.07, 0.01, 0.2, 0.01)
+        self.token_spacing_spin = self.spinboxGrid("Token Spacing", 5, viz_settings_layout, self.vis.set_token_spacing, 0.07, 0.2, 0.01, 0.01)
 
         self.token_data_mode_combo = QComboBox()
         data_modes = ["Decoded Tokens", "Token IDs"]
@@ -758,7 +758,7 @@ class LLaDAGUINew(QMainWindow):
         s("keep_gpu_loaded", self.keep_gpu_loaded_checkbox.isChecked())
 
     def load_settings(self):
-        settings = QSettings("LLaDAGUI", "LLaDAGUI")
+        settings = QSettings("LLaDA_GUI", "LLaDA_GUI")
         self.visualization_type_combo.setCurrentText(settings.value("visualization_type", "Token Stream"))
         self.color_scheme_combo.setCurrentText(settings.value("color_scheme", "Cool"))
         self.token_shape_combo.setCurrentText(settings.value("token_shape", "Circle"))
