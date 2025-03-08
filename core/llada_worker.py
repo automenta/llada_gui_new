@@ -306,8 +306,8 @@ class LLaDAWorker(QThread):
             model = AutoModel.from_pretrained(
                 model_path, trust_remote_code=True, torch_dtype=dtype,
                 device_map="auto" if device == 'cuda' else None, cache_dir="data",
-                low_cpu_mem_usage=True, # ADDED THIS LINE
-                **( {'attn_implementation': 'flash_attention_2'} if device == 'cuda' else {} ) # Conditionally enable FlashAttention-2
+                low_cpu_mem_usage=True,
+                **( {'attn_implementation': 'flash_attention_2'} if device == 'cuda' else {} )
             )
 
             # Resize embeddings for special tokens if needed
