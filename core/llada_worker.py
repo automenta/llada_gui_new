@@ -11,6 +11,7 @@ import time
 import torch
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from transformers import AutoTokenizer, AutoModel
+import numpy as np
 
 from core.utils import cleanup_gpu_memory, get_model_path, format_error
 from core.generate import generate  # Import from our optimized generate.py
@@ -30,6 +31,7 @@ class LLaDAWorker(QThread):
     error = pyqtSignal(str)
     memory_warning = pyqtSignal(str)
     realtime_stats = pyqtSignal(dict) # Signal for realtime stats
+    memory_influence_update = pyqtSignal(np.ndarray) # Signal for memory influence data
 
     def __init__(self, prompt: str, config: Dict[str, Any], parent: Optional[Any] = None): # Type hints
         super().__init__(parent)
@@ -82,6 +84,7 @@ class LLaDAWorker(QThread):
         # Visualization data extraction - Moved visualization logic to a separate method
         self._emit_step_update_signal(tokens)
         self._emit_realtime_stats() # Emit realtime stats at each step
+        self._emit_memory_influence_update() # Emit dummy memory influence data
 
 
     def _emit_step_update_signal(self, tokens: torch.Tensor):
@@ -132,6 +135,22 @@ class LLaDAWorker(QThread):
             "memory_usage": memory_usage_str
         }
         self.realtime_stats.emit(stats)
+
+    def _emit_memory_influence_update(self):
+        """Emit dummy memory influence data for visualization testing."""
+        try:
+            # Generate dummy 32x32 numpy array for memory influence - Structured data
+            grid_resolution = 32
+            x = np.linspace(-3, 3, grid_resolution)
+            y = np.linspace(-3, 3, grid_resolution)
+            X, Y = np.meshgrid(x, y)
+            dummy_memory_influence_data = np.exp(-(X**2 + Y**2) / 2)  # 2D Gaussian as dummy data
+            dummy_memory_influence_data = np.clip(dummy_memory_influence_data, 0, 1) # Ensure data in [0, 1]
+
+            self.memory_influence_update.emit(dummy_memory_influence_data)
+
+        except Exception as e:
+            logger.error(f"Error generating dummy memory influence  {e}")
 
 
     def run(self):
