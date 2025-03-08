@@ -30,7 +30,9 @@ class GLVisualizationWidget(QOpenGLWidget):
         super().__init__(parent)
         self.parent_widget = parent
         self.visualization_type = "Token Stream"
-        self.token_stream_data = []
+        self.token_stream_data_strings = [] # List of token display strings
+        self.token_stream_mask_indices = [] # List of mask indices (bool)
+        self.token_stream_confidence_scores = [] # List of confidence scores
         self.memory_influence_data = None
         self.color_scheme = "Cool"
         self.animation_timer = QTimer(self)
@@ -51,7 +53,11 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def set_visualization_type(self, viz_type): self.visualization_type = viz_type; self.update()
     def set_color_scheme(self, scheme): self.color_scheme = scheme; self.update()
-    def set_token_stream_data(self, data): self.token_stream_data = data; self.update()
+    def set_token_stream_data(self, strings, masks, confidences): # Update to accept lists
+        self.token_stream_data_strings = strings
+        self.token_stream_mask_indices = masks
+        self.token_stream_confidence_scores = confidences
+        self.update()
     def set_memory_influence_data(self, data): self.memory_influence_data = data; self.update()
     def set_token_shape(self, shape): self.token_shape = shape; self.update()
     def set_animation_speed(self, speed): self.animation_speed = speed; self.update()
@@ -126,15 +132,37 @@ class GLVisualizationWidget(QOpenGLWidget):
         glDisableClientState(GL_COLOR_ARRAY)
 
     def draw_token_stream(self):
-        num_tokens = 25
+        num_tokens = len(self.token_stream_data_strings) # Use actual data length
+        if num_tokens == 0: return # Handle empty data
         spacing = self.token_spacing
         start_x = - (num_tokens - 1) * spacing / 2
+
         for i in range(num_tokens):
             x = start_x + i * spacing
             y = np.sin(self.animation_time * 2.0 + i * 0.5) * 0.02
-            size = self.token_size + (i % 5) * 0.003
+            size = self.token_size # Base size
             color = self.get_token_color(i, num_tokens)
-            self.draw_shape(self.token_shape, x, y, size, color)
+            shape = self.token_shape
+
+            if self.token_stream_mask_indices[i]: # Masked token
+                shape = "Square" # Indicate masked tokens with squares
+                size *= 0.8 # Slightly smaller size for masked tokens
+                color = color.darker(150) # Darker color for masked tokens
+            else:
+                confidence = self.token_stream_confidence_scores[i]
+                size += confidence * 0.01 # Size varies with confidence
+                color = self.adjust_color_alpha(color, 0.5 + confidence * 0.5) # Alpha varies with confidence
+
+            self.draw_shape(shape, x, y, size, color)
+            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, self.token_stream_data_strings[i], QColor(200, 200, 220), font_size=10) # Render token text below shape
+
+
+    def adjust_color_alpha(self, color, alpha_factor):
+        """Adjust the alpha (transparency) of a QColor."""
+        current_alpha = color.alphaF()
+        new_alpha = max(0.0, min(1.0, current_alpha * alpha_factor)) # Clamp alpha to [0, 1]
+        return QColor.fromRgbaF(color.redF(), color.greenF(), color.blueF(), new_alpha)
+
 
     def draw_test_square(self):
         self.draw_shape("Square", 0, 0, 0.5, QColor.fromRgbF(1.0, 1.0, 0.0))
@@ -495,11 +523,13 @@ class LLaDAGUINew(QMainWindow):
     def update_progress(self, progress_percent, message, data):
         self.status_bar.showMessage(f"Generating - {message}")
 
-    @pyqtSlot(int, list, list, list)
-    def update_visualization(self, step, tokens, masks, confidences):
+    @pyqtSlot(int, list, list, list, list) # Updated signal params
+    def update_visualization(self, step, tokens, masks, confidences, token_ids): # Updated slot params
         print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
-        self.opengl_viz_widget.set_token_stream_data(tokens)
-        self.opengl_viz_widget.set_memory_influence_data(np.random.rand(32, 32))
+        if self.opengl_viz_widget.visualization_type == "Token Stream":
+            self.opengl_viz_widget.set_token_stream_data(tokens, masks, confidences) # Pass lists to visualizer
+        elif self.opengl_viz_widget.visualization_type == "Memory Influence Map":
+            self.opengl_viz_widget.set_memory_influence_data(np.random.rand(32, 32)) # Keep dummy for now
 
     @pyqtSlot(str)
     def generation_finished(self, output_text):

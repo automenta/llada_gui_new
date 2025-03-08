@@ -26,7 +26,7 @@ MEMORY_WARNING_THRESHOLD_GB = 1.0
 class LLaDAWorker(QThread):
     """Worker thread for handling LLaDA generation."""
     progress = pyqtSignal(int, str, dict)
-    step_update = pyqtSignal(int, list, list, list)
+    step_update = pyqtSignal(int, list, list, list, list) # Added token_ids to signal
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
     memory_warning = pyqtSignal(str)
@@ -47,6 +47,7 @@ class LLaDAWorker(QThread):
         self.generation_mode = GenerationMode.STANDARD # Default to STANDARD mode
         self.last_step_time = None
         self.step_times = []
+        self.tokenizer = None # Store tokenizer instance
 
 
     def stop(self):
@@ -96,11 +97,23 @@ class LLaDAWorker(QThread):
             confidence_scores = [0.0 if m else 1.0 for m in mask_indices]
             mask_indices_bool = [bool(m) for m in mask_indices] # List comprehension
 
+            # Decode token IDs to strings for better visualization
+            token_display_strings = []
+            for token_id in token_ids:
+                if token_id == self.mask_id:
+                    token_display_strings.append("[MASK]")
+                else:
+                    decoded_token = self.tokenizer.decode([token_id], skip_special_tokens=True)
+                    # Handle empty decoded tokens (e.g., beginning of sequence tokens)
+                    token_display_strings.append(decoded_token if decoded_token else "[UNK]")
+
+
             self.step_update.emit(
                 self.current_step,
-                token_display,
+                token_display_strings, # Use decoded token strings
                 mask_indices_bool,
-                confidence_scores
+                confidence_scores,
+                token_ids # Send token IDs as well
             )
         except Exception as e:
             logger.error(f"Error in step update: {e}")
@@ -177,6 +190,7 @@ class LLaDAWorker(QThread):
             tokenizer, model = self._load_model_and_tokenizer(model_path, device)
             if model is None or tokenizer is None: # Handle loading failure
                 return # _load_model_and_tokenizer already emitted error
+            self.tokenizer = tokenizer # Store tokenizer instance in worker
 
             # Prepare input - Input preparation into a separate method
             input_ids = self._prepare_input(tokenizer, device)
