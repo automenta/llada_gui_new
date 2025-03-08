@@ -324,3 +324,17 @@ class LLaDAWorker(QThread):
         logger.info("Performing delayed GPU memory cleanup...")
         cleanup_gpu_memory()
         self.cleanup_timer.stop() # Ensure timer is stopped after cleanup
+
+
+    def cleanup_memory_async(self):
+        """Asynchronously cleans up GPU memory."""
+        print("Initiating GPU memory cleanup...")
+        # --- Replace these placeholders with your actual memory cleanup code ---
+        if hasattr(self, 'model'):
+            del self.model
+            self.model = None # Or reload a lightweight version if needed for quick start
+        torch.cuda.empty_cache() # Clear CUDA cache
+        # --- End of placeholder cleanup code ---
+        mem_stats = self.get_memory_usage()
+        print(f"GPU memory usage post cleanup: {mem_stats['gpu_used']:.2f}GB / {mem_stats['gpu_total']:.2f}GB")
+        self.update_memory_signal.emit(mem_stats) # Update memory monitor if you have this signal
