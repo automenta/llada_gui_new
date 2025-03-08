@@ -236,13 +236,31 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def draw_abstract_token_cloud(self):
         """Placeholder for Abstract Token Cloud visualization."""
-        glColor3f(0.3, 0.7, 0.5) # Greenish for placeholder
-        glBegin(GL_TRIANGLES)
-        glVertex2f(-0.6, -0.6)
-        glVertex2f(0.6, -0.6)
-        glVertex2f(0.0, 0.6)
-        glEnd()
-        # Add text or shapes to indicate it's a placeholder
+        num_clouds = 50 # Example number of clouds
+        for _ in range(num_clouds):
+            # Random position
+            x = random.uniform(-0.9, 0.9)
+            y = random.uniform(-0.9, 0.9)
+            z = random.uniform(-0.9, 0.9) # Z for 3D effect if needed
+
+            # Random size and color
+            size = random.uniform(0.01, 0.05)
+            color = [random.uniform(0.3, 0.7) for _ in range(3)] # Muted green-blue range
+            glColor3f(*color) # Unpack color list
+
+            glPushMatrix()
+            glTranslatef(x, y, 0.0) # Position in 2D for now
+
+            # Draw a simple shape for each cloud - e.g., a point or small triangle
+            glBegin(GL_TRIANGLES) # Using triangles for cloud-like shapes
+            glVertex2f(0, size)
+            glVertex2f(-size, -size)
+            glVertex2f(size, -size)
+            glEnd()
+            glPopMatrix()
+
+
+        # Add central text to indicate it's a placeholder
         glColor3f(1.0, 1.0, 1.0) # White text
         self.render_text(0, 0, "Abstract Token Cloud (Placeholder)")
 
@@ -322,7 +340,7 @@ class GLVisualizationWidget(QOpenGLWidget):
             pan_speed = 0.005 * self.zoom_level # Adjust pan speed factor as needed
 
             self.pan_x += delta_x * pan_speed
-            self.pan_y -= delta_y * pan_speed # Invert Y axis for natural drag
+            self.pan_y -= delta_y * pan_y # Invert Y axis for natural drag
 
             self.last_mouse_pos = current_mouse_pos # Update last mouse position
             self.update() # Trigger repaint
