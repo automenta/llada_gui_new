@@ -160,16 +160,16 @@ class LLaDAWorker(QThread):
             # Stop any existing timer in case of rapid re-generation requests
             if self.cleanup_timer.isActive():
                 self.cleanup_timer.stop()
+            else:
+                # Determine device
+                device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
+                self.progress.emit(5, f"Starting with device: {device}", {})
 
-            # Determine device
-            device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
-            self.progress.emit(5, f"Starting with device: {device}", {})
-
-            if device == 'cuda':
-                # cleanup_gpu_memory() # REMOVED immediate cleanup - this was the cause of premature cleanup
-                free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
-                if free_memory < MEMORY_WARNING_THRESHOLD_GB:
-                    self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
+                if device == 'cuda':
+                    cleanup_gpu_memory() # REMOVED immediate cleanup - this was the cause of premature cleanup
+                    free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
+                    if free_memory < MEMORY_WARNING_THRESHOLD_GB:
+                        self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
 
             model_path = get_model_path()
 
@@ -252,8 +252,6 @@ class LLaDAWorker(QThread):
 
     def _load_model_and_tokenizer(self, model_path: str, device: str) -> tuple[AutoTokenizer, AutoModel]:
         """Loads the tokenizer and model, emitting progress signals and handling errors."""
-        tokenizer = None
-        model = None
         try:
             self.progress.emit(10, "Loading tokenizer...", {})
             tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=True, cache_dir="data")
@@ -264,9 +262,9 @@ class LLaDAWorker(QThread):
             dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
             model = AutoModel.from_pretrained(
                 model_path, trust_remote_code=True, torch_dtype=dtype,
-                device_map="auto" if device == 'cuda' else None, cache_dir="data", resume_download=True
+                device_map="auto" if device == 'cuda' else None, cache_dir="data"
             )
-            model.tie_weights()  # Explicitly tie weights
+            #model.tie_weights()  # Explicitly tie weights
             if device == 'cpu':
                 model = model.to('cpu')
             model.eval() # Ensure eval mode
