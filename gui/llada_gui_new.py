@@ -355,4 +355,183 @@ class GLVisualizationWidget(QOpenGLWidget):
 class LLaDAGUINew(QMainWindow):
     """New OpenGL Visualization-Centric GUI for LLaDA application."""
 
-    # ... (rest of LLaDAGUINew class is unchanged)
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("LLaDA GUI - OpenGL Viz - Prototype")
+        self.resize(1200, 900)  # Slightly larger initial size
+
+        # Worker thread reference
+        self.worker = None
+
+        # Main widget and layout
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+
+        # 1. Prompt Input Area (Top)
+        self.prompt_input = QTextEdit()
+        self.prompt_input.setPlaceholderText("Enter your prompt here...")
+        main_layout.addWidget(self.prompt_input)
+
+        # 2. Visualization and Sidebar Area (Center - Horizontal Layout)
+        viz_sidebar_layout = QHBoxLayout()
+        main_layout.addLayout(viz_sidebar_layout)
+
+        # 2.1. OpenGL Visualization Widget (Left)
+        self.opengl_viz_widget = GLVisualizationWidget()  # Use the new OpenGL widget
+        viz_sidebar_layout.addWidget(self.opengl_viz_widget)
+
+        # 2.2. Sidebar (Right - Scrollable)
+        self.sidebar_scroll_area = QScrollArea()
+        self.sidebar_scroll_area.setWidgetResizable(True)  # Important for scroll area to work correctly
+        self.sidebar_widget = QWidget()  # Widget to hold sidebar content
+        self.sidebar_layout = QVBoxLayout(self.sidebar_widget)  # Layout for sidebar content
+        self.sidebar_scroll_area.setWidget(self.sidebar_widget)  # Set widget to scroll area
+        viz_sidebar_layout.addWidget(self.sidebar_scroll_area)
+
+        # Sidebar Sections (Placeholders for now)
+        self.add_sidebar_sections()
+
+        # 3. Status Bar (Bottom)
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready")  # Initial status message
+
+        # Add Generate and Stop buttons to status bar
+        self.generate_button_status_bar = QPushButton("Generate")
+        self.generate_button_status_bar.clicked.connect(self.on_generate_clicked)
+        self.stop_button_status_bar = QPushButton("Stop")
+        self.stop_button_status_bar.clicked.connect(self.on_stop_clicked)
+        self.stop_button_status_bar.setEnabled(False) # Initially disabled
+
+        self.status_bar.addPermanentWidget(self.generate_button_status_bar)
+        self.status_bar.addPermanentWidget(self.stop_button_status_bar)
+
+        # Clear Button in status bar
+        self.clear_button_status_bar = QPushButton("Clear")
+        self.clear_button_status_bar.clicked.connect(self.clear_output) # Connect to clear_output function
+        self.status_bar.addPermanentWidget(self.clear_button_status_bar)
+
+
+        # Set the central widget
+        self.setCentralWidget(main_widget)
+
+    def add_sidebar_sections(self):
+        """Adds placeholder sections to the sidebar."""
+
+        # ... (rest of add_sidebar_sections method is unchanged)
+
+
+    def get_generation_config(self):
+        """Get the current generation configuration from UI elements."""
+        device = 'cuda' if self.gpu_radio.isChecked() and torch.cuda.is_available() else 'cpu'
+        return {
+            'gen_length': self.gen_length_spin.value(),
+            'steps': self.steps_spin.value(),
+            'block_length': self.block_length_spin.value(),
+            'temperature': self.temperature_spin.value(),
+            'cfg_scale': self.cfg_scale_spin.value(),
+            'remasking': self.remasking_combo.currentText(),
+            'device': device,
+            'use_8bit': self.use_8bit.isChecked() and device == 'cuda',
+            'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
+            'extreme_mode': self.extreme_mode_checkbox.isChecked(),
+            'fast_mode': self.fast_mode_checkbox.isChecked(),
+            'use_memory': self.enable_memory_checkbox.isChecked() # This checkbox does not exist in this GUI - might be from old GUI
+        }
+
+    @pyqtSlot()
+    def on_generate_clicked(self):
+        """Handle Generate button click: start generation."""
+        prompt_text = self.prompt_input.toPlainText().strip()
+        if not prompt_text:
+            QMessageBox.warning(self, "Input Error", "Please enter a prompt.")
+            return
+
+        config = self.get_generation_config()
+
+        # Disable UI elements and enable stop button
+        self.set_ui_generating(True)
+
+        # Create worker thread and connect signals
+        self.worker = LLaDAWorker(prompt_text, config) # Pass config
+        self.worker.progress.connect(self.update_progress) # Connect progress signal
+        self.worker.step_update.connect(self.update_visualization) # Connect step_update
+        self.worker.finished.connect(self.generation_finished) # Connect finished signal
+        self.worker.error.connect(self.generation_error) # Connect error signal
+        self.worker.realtime_stats.connect(self.update_realtime_stats_display) # Connect realtime stats signal
+        self.worker.start() # Start the worker thread
+
+    @pyqtSlot()
+    def on_stop_clicked(self):
+        """Handle Stop button click: stop generation."""
+        if self.worker and self.worker.isRunning():
+            self.worker.stop()
+            self.set_ui_generating(False) # Re-enable UI, keep stop disabled
+
+    @pyqtSlot(int, str, dict)
+    def update_progress(self, progress_percent, message, data):
+        """Update progress bar and status message during generation."""
+        self.status_bar.showMessage(f"Generating - {message}")
+        # Placeholder for progress bar update if we add one to status bar
+
+    @pyqtSlot(int, list, list, list)
+    def update_visualization(self, step, tokens, masks, confidences):
+        """Update visualization during each step."""
+        # For now, just print step info to console - replace with OpenGL viz update later
+        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
+        self.opengl_viz_widget.set_token_stream_data(tokens) # Example of sending data to OpenGL widget
+
+    @pyqtSlot(str)
+    def generation_finished(self, output_text):
+        """Handle generation finished signal."""
+        self.status_bar.showMessage("Generation Finished")
+        # For now, print output to console - replace with proper output display later
+        print(f"Generated Output: {output_text}")
+        self.prompt_input.setPlainText(output_text) # Just for testing, replace with proper output display later
+        self.set_ui_generating(False) # Re-enable UI
+
+    @pyqtSlot(str)
+    def generation_error(self, error_message):
+        """Handle generation error signal."""
+        self.status_bar.showMessage(f"Generation Error: {error_message}")
+        QMessageBox.critical(self, "Generation Error", f"Error: {error_message}")
+        self.set_ui_generating(False) # Re-enable UI
+
+    def set_ui_generating(self, is_generating):
+        """Enable/disable UI elements based on generation status."""
+        self.generate_button_status_bar.setEnabled(not is_generating)
+        self.stop_button_status_bar.setEnabled(is_generating)
+        self.prompt_input.setEnabled(not is_generating)
+        # ... (Add other UI elements to disable as needed)
+
+    @pyqtSlot(dict)
+    def update_realtime_stats_display(self, stats):
+        """Update realtime statistics in the sidebar."""
+        self.token_rate_label.setText(f"Token Rate: {stats.get('token_rate', '-')}")
+        self.step_time_label.setText(f"Step Time: {stats.get('step_time', '-')} ms/step")
+        self.detailed_memory_label.setText(f"Memory Usage: {stats.get('memory_usage', '-')}")
+
+    @pyqtSlot()
+    def clear_output(self):
+        """Clear the output and input text areas and reset visualization."""
+        self.prompt_input.clear()
+        self.opengl_viz_widget.set_visualization_type("Token Stream") # Reset to default viz
+        self.opengl_viz_widget.set_color_scheme("Cool") # Reset color scheme to default
+        self.opengl_viz_widget.set_token_shape("Circle") # Reset token shape
+        self.opengl_viz_widget.set_animation_speed(0.01) # Reset animation speed
+        self.opengl_viz_widget.set_token_size(0.03) # Reset token size
+        self.opengl_viz_widget.set_token_spacing(0.07) # Reset token spacing
+        self.zoom_level_spin.setValue(1.0) # Reset zoom level spinbox
+        self.opengl_viz_widget.set_zoom_level(1.0) # Reset zoom level in GL widget
+
+
+def main():
+    """Main application entry point."""
+    app = QApplication(sys.argv)
+    window = LLaDAGUINew()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
