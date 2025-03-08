@@ -13,7 +13,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from transformers import AutoTokenizer, AutoModel
 import numpy as np
 
-from core.utils import cleanup_gpu_memory, get_model_path, format_error
+from core.utils import cleanup_gpu_memory, get_device_status, get_model_path, format_error
 from core.generate import generate  # Import from our optimized generate.py
 from core.generation_mode import GenerationMode # Import GenerationMode Enum
 
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Define constants
 MEMORY_WARNING_THRESHOLD_GB = 1.0
+MEMORY_UNLOAD_THRESHOLD_GB = 2.0 # Threshold to trigger model unloading in GB
 
 class LLaDAWorker(QThread):
     """Worker thread for handling LLaDA generation."""
@@ -192,6 +193,12 @@ class LLaDAWorker(QThread):
                 model, tokenizer = LLaDAWorker._model_cache[cache_key]
                 self.tokenizer = tokenizer # Store tokenizer instance in worker
             else:
+                # Check GPU memory and unload if needed before loading new model
+                if device == 'cuda':
+                    available_memory_gb = get_device_status()['gpu_info'][0]['free_memory'] # Get free memory in GB
+                    if available_memory_gb < MEMORY_UNLOAD_THRESHOLD_GB and LLaDAWorker._model_cache:
+                        self._unload_cached_model()
+
                 # Load tokenizer and model - Encapsulated loading into a separate method
                 tokenizer, model = self._load_model_and_tokenizer(model_path, device)
                 if model is None or tokenizer is None: # Handle loading failure
@@ -268,6 +275,20 @@ class LLaDAWorker(QThread):
         except Exception as e:
             logger.error(f"Unhandled exception: {e}")
             self.error.emit(format_error(e))
+
+
+    def _unload_cached_model(self):
+        """Unloads the cached model to free up GPU memory."""
+        cache_key_to_unload = next(iter(LLaDAWorker._model_cache)) # Get the first key in cache (FIFO)
+        if cache_key_to_unload:
+            logger.info(f"Unloading cached model with key: {cache_key_to_unload} to free up memory.")
+            model, tokenizer = LLaDAWorker._model_cache.pop(cache_key_to_unload) # Remove from cache
+            del model # Explicitly delete model
+            del tokenizer # Explicitly delete tokenizer
+            cleanup_gpu_memory() # Clean up GPU memory
+            logger.info("Cached model unloaded.")
+        else:
+            logger.warning("No model in cache to unload.")
 
 
     def _load_model_and_tokenizer(self, model_path: str, device: str) -> tuple[AutoTokenizer, AutoModel]:
