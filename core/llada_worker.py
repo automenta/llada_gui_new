@@ -176,11 +176,11 @@ class LLaDAWorker(QThread):
             device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
             self.progress.emit(5, f"Starting with device: {device}", {})
 
-            if device == 'cuda':
-                cleanup_gpu_memory()
-                free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
-                if free_memory < MEMORY_WARNING_THRESHOLD_GB:
-                    self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
+            # if device == 'cuda':
+            #     cleanup_gpu_memory()
+            #     free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
+            #     if free_memory < MEMORY_WARNING_THRESHOLD_GB:
+            #         self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
 
             model_path = get_model_path()
 
@@ -319,22 +319,6 @@ class LLaDAWorker(QThread):
             logger.error(error_msg)
             self.error.emit(error_msg)
             return None # Indicate input preparation failure
-
-
-    def cleanup_memory_async(self):
-        """Asynchronously cleans up GPU memory."""
-        print("Initiating GPU memory cleanup from worker thread...")
-        # --- Replace these placeholders with your actual memory cleanup code ---
-        if hasattr(self, 'model'):
-            del self.model
-            self.model = None # Or reload a lightweight version if needed for quick start
-            print("Model removed from worker.")
-        torch.cuda.empty_cache() # Clear CUDA cache
-        # --- End of placeholder cleanup code ---
-        mem_stats = self.get_memory_usage()
-        print(f"GPU memory usage post cleanup (worker thread): {mem_stats['gpu_used']:.2f}GB / {mem_stats['gpu_total']:.2f}GB")
-        # self.update_memory_signal.emit(mem_stats) # Do not emit signal back to GUI from worker cleanup
-        print("GPU cleanup in worker thread complete.")
 
     def get_memory_usage(self): # Dummy implementation for now
         """Returns dummy memory usage statistics."""
