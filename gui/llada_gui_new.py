@@ -8,7 +8,7 @@ import sys
 
 import torch
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence
+from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QSpinBox, QComboBox, QGroupBox,
@@ -16,9 +16,51 @@ from PyQt6.QtWidgets import (
     QScrollArea, QDoubleSpinBox, QTabWidget, QRadioButton, QButtonGroup,
     QSizePolicy, QStatusBar, QOpenGLWidget, QVBoxLayout
 )
+from PyQt6.QtOpenGL import QOpenGLVersionProfile, QSurfaceFormat
+
+from OpenGL.GL import *  # pylint: disable=W0614,W0611
 
 # Import default parameters
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
+
+
+class GLVisualizationWidget(QOpenGLWidget):
+    """OpenGL widget for visualization."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.object = 0
+
+    def initializeGL(self):
+        """Initialize OpenGL context and settings."""
+        version_profile = QOpenGLVersionProfile()
+        version_profile.setVersion(4, 1)  # Request OpenGL 4.1 - adjust if needed
+        format_ = QSurfaceFormat()
+        format_.setVersion(4, 1)
+        format_.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        QSurfaceFormat.setDefaultFormat(format_)
+
+        glClearColor(0.1, 0.1, 0.2, 1.0) # Dark background
+
+    def paintGL(self):
+        """Paint the OpenGL scene."""
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        # Simple colored square for testing
+        glBegin(GL_QUADS)
+        glColor3f(1.0, 1.0, 0.0) # Yellow color
+        glVertex2f(-0.5, -0.5)
+        glVertex2f(0.5, -0.5)
+        glVertex2f(0.5, 0.5)
+        glVertex2f(-0.5, 0.5)
+        glEnd()
+
+    def resizeGL(self, width, height):
+        """Handle viewport resizing."""
+        glViewport(0, 0, width, height)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(-1, 1, -1, 1, -1, 1) # Orthographic projection
+        glMatrixMode(GL_MODELVIEW)
 
 
 class LLaDAGUINew(QMainWindow):
@@ -43,7 +85,7 @@ class LLaDAGUINew(QMainWindow):
         main_layout.addLayout(viz_sidebar_layout)
 
         # 2.1. OpenGL Visualization Widget (Left)
-        self.opengl_viz_widget = QOpenGLWidget()  # Placeholder for OpenGL Widget
+        self.opengl_viz_widget = GLVisualizationWidget()  # Use the new OpenGL widget
         viz_sidebar_layout.addWidget(self.opengl_viz_widget)
 
         # 2.2. Sidebar (Right - Scrollable)
@@ -77,7 +119,7 @@ class LLaDAGUINew(QMainWindow):
         self.gen_length_spin.setRange(16, 512)
         self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length'])
         self.gen_length_spin.setSingleStep(16)
-        self.gen_length_spin.valueChanged.connect(lambda value: print(f"Generation Length changed: {value}))") # Placeholder
+        self.gen_length_spin.valueChanged.connect(lambda value: print(f"Generation Length changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Length:"), 0, 0)
         generation_layout.addWidget(self.gen_length_spin, 0, 1)
 
@@ -86,7 +128,7 @@ class LLaDAGUINew(QMainWindow):
         self.steps_spin.setRange(16, 512)
         self.steps_spin.setValue(DEFAULT_PARAMS['steps'])
         self.steps_spin.setSingleStep(16)
-        self.steps_spin.valueChanged.connect(lambda value: print(f"Sampling Steps changed: {value}))") # Placeholder
+        self.steps_spin.valueChanged.connect(lambda value: print(f"Sampling Steps changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Steps:"), 1, 0)
         generation_layout.addWidget(self.steps_spin, 1, 1)
 
@@ -95,7 +137,7 @@ class LLaDAGUINew(QMainWindow):
         self.block_length_spin.setRange(16, 256)
         self.block_length_spin.setValue(DEFAULT_PARAMS['block_length'])
         self.block_length_spin.setSingleStep(16)
-        self.block_length_spin.valueChanged.connect(lambda value: print(f"Block Length changed: {value}))") # Placeholder
+        self.block_length_spin.valueChanged.connect(lambda value: print(f"Block Length changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Block Size:"), 2, 0)
         generation_layout.addWidget(self.block_length_spin, 2, 1)
 
@@ -104,7 +146,7 @@ class LLaDAGUINew(QMainWindow):
         self.temperature_spin.setRange(0, 2)
         self.temperature_spin.setValue(DEFAULT_PARAMS['temperature'])
         self.temperature_spin.setSingleStep(0.1)
-        self.temperature_spin.valueChanged.connect(lambda value: print(f"Temperature changed: {value}))") # Placeholder
+        self.temperature_spin.valueChanged.connect(lambda value: print(f"Temperature changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("Temperature:"), 3, 0)
         generation_layout.addWidget(self.temperature_spin, 3, 1)
 
@@ -113,7 +155,7 @@ class LLaDAGUINew(QMainWindow):
         self.cfg_scale_spin.setRange(0, 5)
         self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale'])
         self.cfg_scale_spin.setSingleStep(0.1)
-        self.cfg_scale_spin.valueChanged.connect(lambda value: print(f"CFG Scale changed: {value}))") # Placeholder
+        self.cfg_scale_spin.valueChanged.connect(lambda value: print(f"CFG Scale changed: {value}")) # Placeholder
         generation_layout.addWidget(QLabel("CFG Scale:"), 4, 0)
         generation_layout.addWidget(self.cfg_scale_spin, 4, 1)
 
@@ -121,7 +163,7 @@ class LLaDAGUINew(QMainWindow):
         self.remasking_combo = QComboBox()
         self.remasking_combo.addItems(["low_confidence", "random"])
         self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
-        self.remasking_combo.currentTextChanged.connect(lambda text: print(f"Remasking Strategy changed: {text}))") # Placeholder
+        self.remasking_combo.currentTextChanged.connect(lambda text: print(f"Remasking Strategy changed: {text}")) # Placeholder
         generation_layout.addWidget(QLabel("Remasking:"), 5, 0)
         generation_layout.addWidget(self.remasking_combo, 5, 1)
 
