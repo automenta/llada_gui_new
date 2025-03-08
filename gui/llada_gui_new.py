@@ -37,6 +37,7 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.object = 0
         self.visualization_type = "Token Stream" # Default visualization type
         self.token_stream_data = [] # Placeholder for token stream data
+        self.memory_influence_data = None # Placeholder for memory influence data
         self.color_scheme = "Cool" # Default color scheme
         self.animation_timer = QTimer(self) # Timer for animation
         self.animation_timer.timeout.connect(self.update) # Trigger repaint on timer
@@ -66,6 +67,11 @@ class GLVisualizationWidget(QOpenGLWidget):
     def set_token_stream_data(self, data):
         """Set data for token stream visualization."""
         self.token_stream_data = data
+        self.update()
+
+    def set_memory_influence_data(self, data):
+        """Set data for memory influence map visualization."""
+        self.memory_influence_data = data
         self.update()
 
     def set_token_shape(self, shape):
@@ -202,17 +208,30 @@ class GLVisualizationWidget(QOpenGLWidget):
             glPopMatrix() # Restore transformation
 
     def draw_memory_influence_map(self):
-        """Placeholder for Memory Influence Map visualization."""
-        glColor3f(0.5, 0.5, 0.8) # Light purple for placeholder
-        glBegin(GL_QUADS)
-        glVertex2f(-0.8, -0.8)
-        glVertex2f(0.8, -0.8)
-        glVertex2f(0.8, 0.8)
-        glVertex2f(-0.8, 0.8)
-        glEnd()
-        # Add text or shapes to indicate it's a placeholder
-        glColor3f(1.0, 1.0, 1.0) # White text
-        self.render_text(0, 0, "Memory Influence Map (Placeholder)")
+        """Draw Memory Influence Map visualization."""
+        grid_size = 10 # Example grid size
+        cell_size = 2.0 / grid_size # Normalized cell size
+
+        for row in range(grid_size):
+            for col in range(grid_size):
+                # Calculate position for each cell
+                x = -1.0 + col * cell_size + cell_size / 2.0
+                y = 1.0 - row * cell_size - cell_size / 2.0
+
+                # Generate a random influence value for demonstration
+                influence = random.random() # 0.0 to 1.0
+
+                # Choose color based on influence (example: grayscale)
+                gray_scale = 0.3 + influence * 0.7 # Map 0-1 to gray scale range
+                glColor3f(gray_scale, gray_scale, gray_scale)
+
+                # Draw a square for each cell
+                glBegin(GL_QUADS)
+                glVertex2f(x - cell_size / 2.0, y - cell_size / 2.0) # bottom-left
+                glVertex2f(x + cell_size / 2.0, y - cell_size / 2.0) # bottom-right
+                glVertex2f(x + cell_size / 2.0, y + cell_size / 2.0) # top-right
+                glVertex2f(x - cell_size / 2.0, y + cell_size / 2.0) # top-left
+                glEnd()
 
 
     def draw_abstract_token_cloud(self):
