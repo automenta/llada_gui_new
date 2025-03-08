@@ -10,6 +10,8 @@ import logging
 import os
 import traceback
 import random
+from typing import Union, Dict
+
 import numpy as np
 
 import torch
@@ -236,3 +238,32 @@ def create_data_directories():
     except OSError as e:
         logger.error(f"Error creating data directories: {e}")
         return False
+
+class AttentionCache:
+    """Cache for past key/values to avoid recomputation."""
+
+    def __init__(self, model, cpu_offload: bool = True):
+        """Initialize empty cache for a specific model."""
+        self.model = model
+        self.cache: Dict[str, Union[torch.Tensor, None]] = {} # Explicitly type cache
+        self.cpu_offload = cpu_offload
+        self.CPU_DEVICE = self.DEVICE = None #TODO
+
+    def get(self, key: str, default=None) -> Union[torch.Tensor, None]:
+        """Get a value from the cache, loading to the correct device if needed."""
+        if key not in self.cache:
+            return default
+
+        # Load from CPU if needed
+        if self.cpu_offload and isinstance(self.cache[key], torch.Tensor) and self.cache[key].device.type == "cpu":
+            self.cache[key] = self.cache[key].to(self.DEVICE)
+
+        return self.cache[key]
+
+    def set(self, key: str, value: torch.Tensor):
+        """Set a value in the cache, offloading to CPU if configured."""
+        self.cache[key] = value.to(self.CPU_DEVICE) if self.cpu_offload and isinstance(value, torch.Tensor) and value.device.type != "cpu" else value
+
+    def clear(self):
+        """Clear the cache."""
+        self.cache = {}

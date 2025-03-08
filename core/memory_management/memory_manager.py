@@ -174,7 +174,8 @@ class MemoryManager:
         if listener_func in self.memory_listeners:
             self.memory_listeners.remove(listener_func)
 
-    def get_memory_stats(self):
+    @staticmethod
+    def get_memory_stats():
         """
         Get current memory statistics for system and GPU.
 
@@ -220,7 +221,8 @@ class MemoryManager:
 
         return stats
 
-    def force_cleanup(self):
+    @staticmethod
+    def force_cleanup():
         """Force garbage collection and CUDA memory cleanup."""
         logger.info("Forcing memory cleanup: garbage collection and CUDA cache clear")
         for _ in range(3):  # Multiple GC passes for thorough cleanup
@@ -319,7 +321,8 @@ class MemoryManager:
             return True
         return False
 
-    def estimate_memory_requirement(self, params):
+    @staticmethod
+    def estimate_memory_requirement(params):
         """Estimate memory required based on generation parameters."""
         base_memory_gb = 3.5  # Base memory for LLaDA-8B model (empirical value)
 
@@ -381,7 +384,8 @@ class MemoryManager:
         cutoff_time = time.time() - duration_seconds
         return [(t, s) for t, s in self.history if t >= cutoff_time]
 
-    def _extract_history_data(self, history):
+    @staticmethod
+    def _extract_history_data(history):
         """Extract timestamps and memory percentages from history data."""
         timestamps = [t for t, _ in history]
         system_percent = [s.get('system_percent', 0) for _, s in history]
@@ -446,4 +450,3 @@ class MemoryManager:
                 f"Consider enabling memory optimizations."
             )
         return None
-```
