@@ -12,7 +12,6 @@ This version implements several optimizations:
 import logging
 from typing import Optional, Callable, List
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -114,8 +113,9 @@ def get_adaptive_transfer_schedule(mask_index: torch.Tensor, steps: int, min_ste
     weights = weights / weights.sum() * steps
 
     for i in range(mask_num.size(0)):
-        weighted_tokens = (weights * (mask_num[i].item() / steps)).round().to(torch.int64)
-        diff = mask_num[i].item() - weighted_tokens.sum().item()
+        maski = mask_num[i]
+        weighted_tokens = (weights * (maski.item() / steps)).round().to(torch.int64)
+        diff = maski.item() - weighted_tokens.sum().item()
         if diff > 0:
             for j in range(diff):
                 weighted_tokens[j % steps] += 1
