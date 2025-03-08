@@ -17,6 +17,9 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QStatusBar, QOpenGLWidget, QVBoxLayout
 )
 
+# Import default parameters
+from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
+
 
 class LLaDAGUINew(QMainWindow):
     """New OpenGL Visualization-Centric GUI for LLaDA application."""
@@ -67,8 +70,61 @@ class LLaDAGUINew(QMainWindow):
 
         # Generation Settings ⚙️
         generation_group = QGroupBox("⚙️ Generation Settings")
-        generation_layout = QVBoxLayout()
-        generation_layout.addWidget(QLabel("Generation Options Here"))  # Placeholder
+        generation_layout = QGridLayout() # Use GridLayout for better organization
+
+        # Generation Length
+        self.gen_length_spin = QSpinBox()
+        self.gen_length_spin.setRange(16, 512)
+        self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length'])
+        self.gen_length_spin.setSingleStep(16)
+        self.gen_length_spin.valueChanged.connect(lambda value: print(f"Generation Length changed: {value}))") # Placeholder
+        generation_layout.addWidget(QLabel("Length:"), 0, 0)
+        generation_layout.addWidget(self.gen_length_spin, 0, 1)
+
+        # Sampling Steps
+        self.steps_spin = QSpinBox()
+        self.steps_spin.setRange(16, 512)
+        self.steps_spin.setValue(DEFAULT_PARAMS['steps'])
+        self.steps_spin.setSingleStep(16)
+        self.steps_spin.valueChanged.connect(lambda value: print(f"Sampling Steps changed: {value}))") # Placeholder
+        generation_layout.addWidget(QLabel("Steps:"), 1, 0)
+        generation_layout.addWidget(self.steps_spin, 1, 1)
+
+        # Block Length
+        self.block_length_spin = QSpinBox()
+        self.block_length_spin.setRange(16, 256)
+        self.block_length_spin.setValue(DEFAULT_PARAMS['block_length'])
+        self.block_length_spin.setSingleStep(16)
+        self.block_length_spin.valueChanged.connect(lambda value: print(f"Block Length changed: {value}))") # Placeholder
+        generation_layout.addWidget(QLabel("Block Size:"), 2, 0)
+        generation_layout.addWidget(self.block_length_spin, 2, 1)
+
+        # Temperature
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0, 2)
+        self.temperature_spin.setValue(DEFAULT_PARAMS['temperature'])
+        self.temperature_spin.setSingleStep(0.1)
+        self.temperature_spin.valueChanged.connect(lambda value: print(f"Temperature changed: {value}))") # Placeholder
+        generation_layout.addWidget(QLabel("Temperature:"), 3, 0)
+        generation_layout.addWidget(self.temperature_spin, 3, 1)
+
+        # CFG Scale
+        self.cfg_scale_spin = QDoubleSpinBox()
+        self.cfg_scale_spin.setRange(0, 5)
+        self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale'])
+        self.cfg_scale_spin.setSingleStep(0.1)
+        self.cfg_scale_spin.valueChanged.connect(lambda value: print(f"CFG Scale changed: {value}))") # Placeholder
+        generation_layout.addWidget(QLabel("CFG Scale:"), 4, 0)
+        generation_layout.addWidget(self.cfg_scale_spin, 4, 1)
+
+        # Remasking Strategy
+        self.remasking_combo = QComboBox()
+        self.remasking_combo.addItems(["low_confidence", "random"])
+        self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
+        self.remasking_combo.currentTextChanged.connect(lambda text: print(f"Remasking Strategy changed: {text}))") # Placeholder
+        generation_layout.addWidget(QLabel("Remasking:"), 5, 0)
+        generation_layout.addWidget(self.remasking_combo, 5, 1)
+
         generation_group.setLayout(generation_layout)
         self.sidebar_layout.addWidget(generation_group)
 
