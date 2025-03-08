@@ -4,471 +4,874 @@
 LLaDA GUI - New OpenGL Visualization-Centric GUI for LLaDA.
 """
 
-import sys
 import random
-
+import sys
+import numpy as np
 import torch
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QFont, QTextCursor, QShortcut, QKeySequence, QColor
+import time
+from OpenGL.GL import *
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSettings, QThread
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTextEdit, QPushButton, QLabel, QSpinBox, QComboBox, QGroupBox,
     QCheckBox, QProgressBar, QSplitter, QMessageBox, QGridLayout,
-    QScrollArea, QDoubleSpinBox, QTabWidget, QRadioButton, QButtonGroup,
-    QSizePolicy, QStatusBar, QOpenGLWidget, QVBoxLayout
+    QScrollArea, QDoubleSpinBox, QRadioButton, QButtonGroup, QStatusBar
 )
-from PyQt6.QtOpenGL import QOpenGLVersionProfile, QSurfaceFormat
+import matplotlib.pyplot as plt
 
-from OpenGL.GL import *  # pylint: disable=W0614,W0611
-from OpenGL import GLU  # Import GLU for gluDisk
-import numpy as np
-
-
-# Import our modules with updated paths
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
 from core.llada_worker import LLaDAWorker
-from core.utils import format_error
+from gui.memory_monitor import MemoryMonitor
 
 
 class GLVisualizationWidget(QOpenGLWidget):
-    """OpenGL widget for visualization."""
+    """OpenGL widget for visualizations."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.object = 0
-        self.visualization_type = "Token Stream" # Default visualization type
-        self.token_stream_data = [] # Placeholder for token stream data
-        self.color_scheme = "Cool" # Default color scheme
-        self.animation_timer = QTimer(self) # Timer for animation
-        self.animation_timer.timeout.connect(self.update) # Trigger repaint on timer
-        self.animation_time = 0.0 # Time counter for animation
-        self.animation_speed = 0.01 # Animation speed factor
-        self.animation_timer.start(20) # 20ms interval for ~50fps animation
+        self.parent_widget = parent
+        self.visualization_type = "Token Stream"
+        self.token_stream_data_strings = []
+        self.token_stream_mask_indices = []
+        self.token_stream_confidence_scores = []
+        self.memory_influence_data = None
+        self.color_scheme_name = "Cool"
+        self.animation_timer = QTimer(self)
+        self.animation_timer.timeout.connect(self.update)
+        self.animation_time = 0.0
+        self.animation_speed = 0.01
+        self.animation_timer.start(20)
+        self.token_shape_name = "Circle"
+        self.token_size = 0.03
+        self.token_spacing = 0.07
+        self.zoom_level = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self.setMouseTracking(True)
+        self.last_mouse_pos = None
+        self.text_textures = {}
+        self.text_coords = {}
+        self.token_stream_data_mode = "Decoded Tokens"
+        self.show_probability_bar = True
 
-
-    def set_visualization_type(self, viz_type):
-        """Set the current visualization type."""
-        self.visualization_type = viz_type
-        self.update() # Trigger repaint
-
-    def set_color_scheme(self, scheme):
-        """Set the color scheme for visualizations."""
-        self.color_scheme = scheme
+    # --- Setters ---
+    def set_visualization_type(self, viz_type): self.visualization_type = viz_type; self.update()
+    def set_color_scheme(self, scheme_name): self.color_scheme_name = scheme_name; self.update()
+    def set_token_stream_data(self, data, masks, confidences, data_mode="Decoded Tokens"):
+        self.token_stream_data_strings = data
+        self.token_stream_mask_indices = masks
+        self.token_stream_confidence_scores = confidences
+        self.token_stream_data_mode = data_mode
         self.update()
-
-    def set_token_stream_data(self, data):
-        """Set data for token stream visualization."""
-        self.token_stream_data = data
-        self.update()
+    def set_memory_influence_data(self, data): self.memory_influence_data = data; self.update()
+    def set_token_shape(self, shape_name): self.token_shape_name = shape_name; self.update()
+    def set_animation_speed(self, speed): self.animation_speed = speed; self.update()
+    def set_token_size(self, size): self.token_size = size; self.update()
+    def set_token_spacing(self, spacing): self.token_spacing = spacing; self.update()
+    def set_zoom_level(self, zoom): self.zoom_level = zoom; self.update()
+    def set_pan(self, pan_x, pan_y): self.pan_x = pan_x; self.pan_y = pan_y; self.update()
+    def set_token_stream_data_mode(self, mode): self.token_stream_data_mode = mode; self.update()
+    def set_show_probability_bar(self, show_bar): self.show_probability_bar = show_bar; self.update()
 
     def initializeGL(self):
-        """Initialize OpenGL context and settings."""
-        version_profile = QOpenGLVersionProfile()
-        version_profile.setVersion(4, 1)  # Request OpenGL 4.1 - adjust if needed
-        format_ = QSurfaceFormat()
-        format_.setVersion(4, 1)
-        format_.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-        QSurfaceFormat.setDefaultFormat(format_)
-
-        glClearColor(0.1, 0.1, 0.2, 1.0) # Dark background
+        if not self.context().isValid():
+            raise RuntimeError("Failed to create a valid OpenGL context")
+        if self.context().format().majorVersion() < 3:
+            print("Warning: OpenGL 3.3+ not supported.")
+        glClearColor(0.1, 0.1, 0.2, 1.0)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D)
 
     def paintGL(self):
-        """Paint the OpenGL scene."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glEnable(GL_BLEND) # Enable blending for smooth circles
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) # Standard alpha blending
-
-        self.animation_time += self.animation_speed # Increment animation time
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(-1 * self.zoom_level + self.pan_x, 1 * self.zoom_level + self.pan_x,
+                -1 * self.zoom_level + self.pan_y, 1 * self.zoom_level + self.pan_y, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        self.animation_time += self.animation_speed
 
         if self.visualization_type == "Token Stream":
             self.draw_token_stream()
         elif self.visualization_type == "Test Square":
-            self.draw_test_square() # Default or fallback visualization
+            self.draw_test_square()
+        elif self.visualization_type == "Memory Influence Map":
+            self.draw_memory_influence_map()
+        elif self.visualization_type == "Abstract Token Cloud":
+            self.draw_abstract_token_cloud()
+            self.render_text(-0.5, 0, "Token Cloud Active", QColor(255, 255, 255))
+        elif self.visualization_type == "Probability Distribution":
+            self.draw_probability_distribution()
 
-        glDisable(GL_BLEND) # Disable blending when done
+    def draw_probability_distribution(self):
+        """Draws a placeholder probability distribution bar chart."""
+        num_bars = 50
+        bar_width = 0.02
+        spacing = bar_width * 1.2
+        start_x = - (num_bars - 1) * spacing / 2
+        probabilities = np.random.rand(num_bars)
+        normalized_probs = probabilities / np.max(probabilities) if np.max(probabilities) > 0 else probabilities
 
+        for i in range(num_bars):
+            x = start_x + i * spacing
+            y_base = -0.9
+            bar_height = normalized_probs[i] * 1.8
+            color = self.get_token_color(i, num_bars)
+            self.draw_shape("Square", x, y_base + bar_height / 2, bar_width / 2, color)
+            # Optional: render token labels if available
 
-    def draw_test_square(self):
-        """Draw a simple colored square for testing."""
-        glBegin(GL_QUADS)
-        glColor3f(1.0, 1.0, 0.0) # Yellow color
-        glVertex2f(-0.5, -0.5)
-        glVertex2f(0.5, -0.5)
-        glVertex2f(0.5, 0.5)
-        glVertex2f(-0.5, 0.5)
-        glEnd()
+    def draw_shape(self, shape_type, x, y, size, color, num_vertices=None):
+        """Draws a shape (Circle, Square, Triangle, Line) with specified parameters."""
+        vertices = []
+        colors = []
+        color_rgba = [color.redF(), color.greenF(), color.blueF(), 0.7]
+        mode = GL_TRIANGLES
+
+        if shape_type == "Circle":
+            num_vertices = num_vertices or 32
+            for theta in np.linspace(0, 2 * np.pi, num_vertices, endpoint=False):
+                x0 = x + size * np.cos(theta)
+                y0 = y + size * np.sin(theta)
+                x1 = x + size * np.cos(theta + 2 * np.pi / num_vertices)
+                y1 = y + size * np.sin(theta + 2 * np.pi / num_vertices)
+                vertices.extend([x, y, 0.0, x0, y0, 0.0, x1, y1, 0.0])
+                colors.extend(color_rgba * 3)
+        elif shape_type == "Square":
+            vertices.extend([x - size, y - size, 0.0, x + size, y - size, 0.0, x + size, y + size, 0.0, x - size, y + size, 0.0])
+            colors.extend(color_rgba * 4)
+            mode = GL_QUADS
+        elif shape_type == "Triangle":
+            vertices.extend([x, y + size, 0.0, x - size, y - size, 0.0, x + size, y - size, 0.0])
+            colors.extend(color_rgba * 3)
+        elif shape_type == "Line":
+            vertices.extend([x, y - size, 0.0, x, y + size, 0.0])
+            colors.extend(color_rgba * 2)
+            mode = GL_LINES
+            glLineWidth(2.0)
+
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_COLOR_ARRAY)
+        glVertexPointer(3, GL_FLOAT, 0, vertices)
+        glColorPointer(4, GL_FLOAT, 0, colors)
+        glDrawArrays(mode, 0, len(vertices) // 3)
+        glDisableClientState(GL_VERTEX_ARRAY)
+        glDisableClientState(GL_COLOR_ARRAY)
+        if mode == GL_LINES: glLineWidth(1.0)
 
     def draw_token_stream(self):
-        """Draw the Token Stream visualization."""
-        num_tokens = 25 # Increased number of tokens for better stream
-        spacing = 0.07 # Reduced spacing for denser stream
-        start_x = - (num_tokens - 1) * spacing / 2 # Center tokens
+        """Draws the token stream visualization."""
+        num_tokens = len(self.token_stream_data_strings)
+        if num_tokens == 0: return
+        spacing = self.token_spacing
+        start_x = - (num_tokens - 1) * spacing / 2
 
         for i in range(num_tokens):
             x = start_x + i * spacing
-            y_offset = np.sin(self.animation_time * 2.0 + i * 0.5) * 0.02 # Wavy motion
-            y = y_offset # Vertical wave motion
-            size = 0.03 + (i % 5) * 0.003 # Even smaller size variation, subtle
-
-            # Get color based on scheme
+            y = np.sin(self.animation_time * 2.0 + i * 0.5) * 0.02
+            size = self.token_size
             color = self.get_token_color(i, num_tokens)
-            glColor4f(color.redF(), color.greenF(), color.blueF(), 0.7) # Slightly more transparent
+            shape = self.token_shape_name
 
-            # Draw smooth circle using gluDisk - Enhanced visual
-            glPushMatrix() # Prepare transformation matrix for each token
-            glTranslatef(x, y, 0.0) # Translate to token position
-            gluDisk(
-                quad=gluNewQuadric(), # Create quadric object
-                innerRadius=0,
-                outerRadius=size,
-                slices=32, # Smooth circle
-                loops=32
-            )
-            glPopMatrix() # Restore transformation
+            if self.token_stream_mask_indices[i]:
+                shape = "Square"
+                size *= 0.8
+                color = color.darker(150)
+            else:
+                confidence = self.token_stream_confidence_scores[i]
+                size += confidence * 0.01
+                color = self.adjust_color_alpha(color, 0.5 + confidence * 0.5)
 
+            text_to_render = self.token_stream_data_strings[i] if self.token_stream_data_mode == "Decoded Tokens" else str(self.token_stream_data_strings[i])
+
+            self.draw_shape(shape, x - self.token_spacing * 0.3, y - self.token_size * 2, size, color)
+            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, text_to_render, QColor(200, 200, 220), font_size=10)
+
+            if self.show_probability_bar:
+                prob_bar_height = confidence * 0.1
+                prob_bar_y_offset = self.token_size * 1.5
+                prob_bar_color = color.lighter(130)
+                self.draw_shape("Line", x, y + prob_bar_y_offset, prob_bar_height, prob_bar_color)
+
+    def adjust_color_alpha(self, color, alpha_factor):
+        """Adjusts the alpha (transparency) of a QColor."""
+        new_alpha = max(0.0, min(1.0, color.alphaF() * alpha_factor))
+        return QColor.fromRgbF(color.redF(), color.greenF(), color.blueF(), new_alpha)
+
+    def draw_test_square(self):
+        """Draws a simple test square."""
+        self.draw_shape("Square", 0, 0, 0.5, QColor.fromRgbF(1.0, 1.0, 0.0))
+
+    def draw_memory_influence_map(self):
+        """Draws the memory influence map visualization."""
+        grid_resolution = 32
+        influence_data = self.memory_influence_data if self.memory_influence_data is not None else np.random.rand(grid_resolution, grid_resolution)
+        cmap = self.get_colormap(self.color_scheme_name)
+        normalized_data = (influence_data - influence_data.min()) / (influence_data.max() - influence_data.min() + 1e-8)
+        colors = cmap(normalized_data.flatten())
+        cell_size = 2.0 / grid_resolution
+        vertices, vertex_colors = [], []
+        for i in range(grid_resolution):
+            for j in range(grid_resolution):
+                x = -1.0 + j * cell_size
+                y = 1.0 - i * cell_size
+                color = colors[i * grid_resolution + j]
+                vertices.extend([x, y, 0.0, x + cell_size, y, 0.0, x + cell_size, y - cell_size, 0.0, x, y - cell_size, 0.0])
+                vertex_colors.extend([color[0], color[1], color[2], 1.0] * 4)
+
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_COLOR_ARRAY)
+        glVertexPointer(3, GL_FLOAT, 0, vertices)
+        glColorPointer(4, GL_FLOAT, 0, vertex_colors)
+        glDrawArrays(GL_QUADS, 0, len(vertices) // 3)
+        glDisableClientState(GL_VERTEX_ARRAY)
+        glDisableClientState(GL_COLOR_ARRAY)
+
+    def draw_abstract_token_cloud(self):
+        """Draws an abstract token cloud visualization."""
+        num_clouds = 50
+        for _ in range(num_clouds):
+            x = random.uniform(-0.9, 0.9)
+            y = random.uniform(-0.9, 0.9)
+            size = random.uniform(0.01, 0.05)
+            color = QColor.fromRgbF(*[random.uniform(0.3, 0.7) for _ in range(3)])
+            self.draw_shape("Triangle", x, y, size, color)
+
+    def get_colormap(self, scheme_name="Cool"):
+        """Returns a matplotlib colormap by name."""
+        colormap_options = {
+            "Cool": plt.cm.viridis, "Warm": plt.cm.magma, "GrayScale": plt.cm.gray,
+            "Rainbow": plt.cm.rainbow, "CoolWarm": plt.cm.coolwarm, "Plasma": plt.cm.plasma
+        }
+        return colormap_options.get(scheme_name, plt.cm.viridis)
 
     def get_token_color(self, index, total_tokens):
-        """Get color for token based on color scheme."""
-        hue = (index * 360 / total_tokens) % 360 / 360.0 # Hue progression
+        """Generates a token color based on index and selected color scheme."""
+        hue = (index * 360 / total_tokens) % 360 / 360.0
+        color_scheme_funcs = {
+            "Cool": lambda h: QColor.fromHslF(h * 0.5 + 0.5, 0.8, 0.7),
+            "Warm": lambda h: QColor.fromHslF(h * 0.1, 0.7, 0.7),
+            "GrayScale": lambda h: QColor.fromRgbF(0.2 + (1.0 - (index / total_tokens) * 0.7), 0.2 + (1.0 - (index / total_tokens) * 0.7), 0.2 + (1.0 - (index / total_tokens) * 0.7)),
+            "Rainbow": lambda h: QColor.fromHslF(hue, 0.9, 0.6),
+            "CoolWarm": lambda h: QColor.fromHslF(h * 0.5, 0.7, 0.7),
+            "Plasma": lambda h: QColor.fromHslF(h * 0.2, 0.8, 0.6)
+        }
+        return color_scheme_funcs.get(self.color_scheme_name, lambda h: QColor.fromHslF(h * 0.5 + 0.5, 0.8, 0.7))(hue)
 
-        if self.color_scheme == "Cool":
-            # Cool scheme - blues and greens
-            return QColor.fromHslF(hue * 0.5 + 0.5, 0.8, 0.7) # Adjusted hue, saturation, lightness
-        elif self.color_scheme == "Warm":
-            # Warm scheme - reds and oranges
-            return QColor.fromHslF(hue * 0.1, 0.7, 0.7) # Adjusted hue, saturation, lightness
-        elif self.color_scheme == "GrayScale":
-            # Gray scale - simple gray based on index
-            gray_val = 0.2 + (1.0 - (index / total_tokens) * 0.7) # Darker to lighter gray
-            return QColor.fromRgbF(gray_val, gray_val, gray_val)
-        elif self.color_scheme == "Rainbow":
-            # Full spectrum rainbow
-            return QColor.fromHslF(hue, 0.9, 0.6)
-        else:
-            # Default - Cool (as fallback)
-            return QColor.fromHslF(hue * 0.5 + 0.5, 0.8, 0.7)
+    def render_text(self, x, y, text, color, font_size=16):
+        """Renders text using bitmap textures with caching."""
+        if not text: return
+        font = QFont("Arial", font_size)
+        metrics = QFontMetrics(font)
+        text_width = metrics.horizontalAdvance(text)
+        text_height = metrics.height()
 
+        if text not in self.text_textures:
+            image = QImage(text_width, text_height, QImage.Format.Format_ARGB32)
+            painter = QPainter(image)
+            painter.setFont(font)
+            painter.setPen(color)
+            painter.drawText(0, metrics.ascent(), text)
+            painter.end()
+
+            texture_id = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, texture_id)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+            image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
+            if image_ # Fix: Check if image_data is not None
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
+            self.text_textures[text] = texture_id
+            self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
+
+        glBindTexture(GL_TEXTURE_2D, self.text_textures[text])
+        w, h = self.text_coords[text]
+        glBegin(GL_QUADS)
+        glTexCoord2f(0, 1); glVertex2f(x, y)
+        glTexCoord2f(1, 1); glVertex2f(x + w, y)
+        glTexCoord2f(1, 0); glVertex2f(x + w, y + h)
+        glTexCoord2f(0, 0); glVertex2f(x, y + h)
+        glEnd()
+        glBindTexture(GL_TEXTURE_2D, 0)
 
     def resizeGL(self, width, height):
-        """Handle viewport resizing."""
         glViewport(0, 0, width, height)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        glOrtho(-1, 1, -1, 1, -1, 1) # Orthographic projection
+        glOrtho(-1, 1, -1, 1, -1, 1)
         glMatrixMode(GL_MODELVIEW)
+
+    def wheelEvent(self, event):
+        zoom_factor = 0.15
+        delta = event.angleDelta().y()
+        self.zoom_level *= (1.0 - zoom_factor) if delta > 0 else (1.0 + zoom_factor)
+        self.zoom_level = max(0.1, min(self.zoom_level, 5.0))
+        if self.parent_widget: self.parent_widget.zoom_level_spin.setValue(self.zoom_level)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton: self.last_mouse_pos = event.pos()
+
+    def mouseMoveEvent(self, event):
+        if self.last_mouse_pos is not None:
+            delta_x = event.pos().x() - self.last_mouse_pos.x()
+            delta_y = event.pos().y() - self.last_mouse_pos.y()
+            pan_speed = 0.005 * self.zoom_level
+            self.pan_x -= delta_x * pan_speed
+            self.pan_y += delta_y * pan_speed
+            self.last_mouse_pos = event.pos()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton: self.last_mouse_pos = None
 
 
 class LLaDAGUINew(QMainWindow):
-    """New OpenGL Visualization-Centric GUI for LLaDA application."""
-
+    """Main window for the LLaDA GUI."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LLaDA GUI - OpenGL Viz - Prototype")
-        self.resize(1200, 900)  # Slightly larger initial size
-
-        # Worker thread reference
+        self.resize(1200, 900)
+        self.memory_monitor = MemoryMonitor()
+        self.memory_monitor.update.connect(self.update_memory_status_bar)
+        self.memory_monitor.start()
         self.worker = None
+        self.token_stream_data_mode = "Decoded Tokens"
 
-        # Main widget and layout
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
+        self.cleanup_timer = QTimer(self)
+        self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory) # Changed to _delayed_cleanup_gpu_memory
+        self.gpu_cleanup_delay = 5 * 60 * 1000  # 5 minutes delay
+        self.keep_gpu_loaded = False
 
-        # 1. Prompt Input Area (Top)
-        self.prompt_input = QTextEdit()
-        self.prompt_input.setPlaceholderText("Enter your prompt here...")
-        main_layout.addWidget(self.prompt_input)
+        self.setup_ui()
+        self.load_settings()
+        print("LLaDAGUINew initialized in thread:", QThread.currentThread()) # DEBUG: Check thread
 
-        # 2. Visualization and Sidebar Area (Center - Horizontal Layout)
-        viz_sidebar_layout = QHBoxLayout()
-        main_layout.addLayout(viz_sidebar_layout)
+    def _create_labeled_widget(self, label_text, widget=None, tooltip=None):
+        """Creates a labeled widget with optional tooltip."""
+        label = QLabel(label_text)
+        if tooltip: widget.setToolTip(tooltip)
+        return label, widget
 
-        # 2.1. OpenGL Visualization Widget (Left)
-        self.opengl_viz_widget = GLVisualizationWidget()  # Use the new OpenGL widget
-        viz_sidebar_layout.addWidget(self.opengl_viz_widget)
+    def add_widget_to_grid(self, layout, label_text, widget, row, col, tooltip=None):
+        """Adds a labeled widget to a grid layout."""
+        label, widget = self._create_labeled_widget(label_text, widget, tooltip)
+        layout.addWidget(label, row, col)
+        layout.addWidget(widget, row, col + 1)
 
-        # 2.2. Sidebar (Right - Scrollable)
-        self.sidebar_scroll_area = QScrollArea()
-        self.sidebar_scroll_area.setWidgetResizable(True)  # Important for scroll area to work correctly
-        self.sidebar_widget = QWidget()  # Widget to hold sidebar content
-        self.sidebar_layout = QVBoxLayout(self.sidebar_widget)  # Layout for sidebar content
-        self.sidebar_scroll_area.setWidget(self.sidebar_widget)  # Set widget to scroll area
-        viz_sidebar_layout.addWidget(self.sidebar_scroll_area)
-
-        # Sidebar Sections (Placeholders for now)
-        self.add_sidebar_sections()
-
-        # 3. Status Bar (Bottom)
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")  # Initial status message
-
-        # Add Generate and Stop buttons to status bar
-        self.generate_button_status_bar = QPushButton("Generate")
-        self.generate_button_status_bar.clicked.connect(self.on_generate_clicked)
-        self.stop_button_status_bar = QPushButton("Stop")
-        self.stop_button_status_bar.clicked.connect(self.on_stop_clicked)
-        self.stop_button_status_bar.setEnabled(False) # Initially disabled
-
-        self.status_bar.addPermanentWidget(self.generate_button_status_bar)
-        self.status_bar.addPermanentWidget(self.stop_button_status_bar)
-
-
-        # Set the central widget
-        self.setCentralWidget(main_widget)
-
-    def add_sidebar_sections(self):
-        """Adds placeholder sections to the sidebar."""
-
-        # Generation Settings ⚙️
-        generation_group = QGroupBox("⚙️ Generation Settings")
-        generation_layout = QGridLayout() # Use GridLayout for better organization
-
-        # Generation Length
-        self.gen_length_spin = QSpinBox()
-        self.gen_length_spin.setRange(16, 512)
-        self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length'])
-        self.gen_length_spin.setSingleStep(16)
-        generation_layout.addWidget(QLabel("Length:"), 0, 0)
-        generation_layout.addWidget(self.gen_length_spin, 0, 1)
-
-        # Sampling Steps
-        self.steps_spin = QSpinBox()
-        self.steps_spin.setRange(16, 512)
-        self.steps_spin.setValue(DEFAULT_PARAMS['steps'])
-        self.steps_spin.setSingleStep(16)
-        generation_layout.addWidget(QLabel("Steps:"), 1, 0)
-        generation_layout.addWidget(self.steps_spin, 1, 1)
-
-        # Block Length
-        self.block_length_spin = QSpinBox()
-        self.block_length_spin.setRange(16, 256)
-        self.block_length_spin.setValue(DEFAULT_PARAMS['block_length'])
-        self.block_length_spin.setSingleStep(16)
-        generation_layout.addWidget(QLabel("Block Size:"), 2, 0)
-        generation_layout.addWidget(self.block_length_spin, 2, 1)
-
-        # Temperature
-        self.temperature_spin = QDoubleSpinBox()
-        self.temperature_spin.setRange(0, 2)
-        self.temperature_spin.setValue(DEFAULT_PARAMS['temperature'])
-        self.temperature_spin.setSingleStep(0.1)
-        generation_layout.addWidget(QLabel("Temperature:"), 3, 0)
-        generation_layout.addWidget(self.temperature_spin, 3, 1)
-
-        # CFG Scale
-        self.cfg_scale_spin = QDoubleSpinBox()
-        self.cfg_scale_spin.setRange(0, 5)
-        self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale'])
-        self.cfg_scale_spin.setSingleStep(0.1)
-        generation_layout.addWidget(QLabel("CFG Scale:"), 4, 0)
-        generation_layout.addWidget(self.cfg_scale_spin, 4, 1)
-
-        # Remasking Strategy
-        self.remasking_combo = QComboBox()
-        self.remasking_combo.addItems(["low_confidence", "random"])
-        self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
-        generation_layout.addWidget(QLabel("Remasking:"), 5, 0)
-        generation_layout.addWidget(self.remasking_combo, 5, 1)
-
-        generation_group.setLayout(generation_layout)
-        self.sidebar_layout.addWidget(generation_group)
-
-        # Model & Hardware 🧠
-        model_group = QGroupBox("🧠 Model & Hardware")
-        model_layout = QGridLayout()
-
-        # Device Selection
-        device_layout = QHBoxLayout()
-        self.cpu_radio = QRadioButton("CPU")
-        self.gpu_radio = QRadioButton("GPU (CUDA)")
-        self.device_group = QButtonGroup()
-        self.device_group.addButton(self.cpu_radio)
-        self.device_group.addButton(self.gpu_radio)
-        self.cpu_radio.toggled.connect(lambda checked: print(f"Device CPU selected: {checked}))")) # Placeholder
-        self.gpu_radio.toggled.connect(lambda checked: print(f"Device GPU selected: {checked}))")) # Placeholder
-        device_layout.addWidget(self.cpu_radio)
-        device_layout.addWidget(self.gpu_radio)
-        model_layout.addWidget(QLabel("Device:"), 0, 0)
-        model_layout.addLayout(device_layout, 0, 1)
-
-        # Precision Options
-        precision_layout = QHBoxLayout()
-        self.normal_precision_radio = QRadioButton("Normal")
-        self.quant_8bit_radio = QRadioButton("8-bit")
-        self.quant_4bit_radio = QRadioButton("4-bit")
-        self.precision_group = QButtonGroup()
-        self.precision_group.addButton(self.normal_precision_radio)
-        self.precision_group.addButton(self.quant_8bit_radio)
-        self.precision_group.addButton(self.quant_4bit_radio)
-        self.normal_precision_radio.toggled.connect(lambda checked: print(f"Precision Normal selected: {checked}))")) # Placeholder
-        self.quant_8bit_radio.toggled.connect(lambda checked: print(f"Precision 8-bit selected: {checked}))")) # Placeholder
-        self.quant_4bit_radio.toggled.connect(lambda checked: print(f"Precision 4-bit selected: {checked}))")) # Placeholder
-        precision_layout.addWidget(self.normal_precision_radio)
-        precision_layout.addWidget(self.quant_8bit_radio)
-        precision_layout.addWidget(self.quant_4bit_radio)
-        model_layout.addWidget(QLabel("Precision:"), 1, 0)
-        model_layout.addLayout(precision_layout, 1, 1)
-
-        # Extreme Mode Checkbox
-        self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
-        self.extreme_mode_checkbox.toggled.connect(lambda checked: print(f"Extreme Mode selected: {checked}))")) # Placeholder
-        model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
-
-        # Fast Mode Checkbox
-        self.fast_mode_checkbox = QCheckBox("Fast Mode")
-        self.fast_mode_checkbox.toggled.connect(lambda checked: print(f"Fast Mode selected: {checked}))")) # Placeholder
-        model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
-
-
-        model_group.setLayout(model_layout)
-        self.sidebar_layout.addWidget(model_group)
-
-        # Memory Integration 💾
-        memory_group = QGroupBox("💾 Memory Integration")
-        memory_layout = QVBoxLayout()
-
-        # Enable Memory Integration Checkbox
-        self.enable_memory_checkbox = QCheckBox("Enable Memory Integration")
-        self.enable_memory_checkbox.toggled.connect(lambda checked: print(f"Memory Integration enabled: {checked}")) # Placeholder
-        memory_layout.addWidget(self.enable_memory_checkbox)
-
-        # Memory Server Status Label
-        self.memory_server_status_label = QLabel("Memory Server Status: Unknown") # Initial status
-        memory_layout.addWidget(self.memory_server_status_label)
-
-
-        memory_group.setLayout(memory_layout)
-        self.sidebar_layout.addWidget(memory_group)
-
-        # Realtime Statistics 📊
-        stats_group = QGroupBox("📊 Realtime Statistics")
-        stats_layout = QGridLayout()
-
-        # Token Rate Display
-        self.token_rate_label = QLabel("Token Rate: - tokens/s")
-        stats_layout.addWidget(self.token_rate_label, 0, 0)
-
-        # Step Time Display
-        self.step_time_label = QLabel("Step Time: - ms/step")
-        stats_layout.addWidget(self.step_time_label, 1, 0)
-
-        # Detailed Memory Usage Display (Placeholder - expandable later)
-        self.detailed_memory_label = QLabel("Memory Usage: - ")
-        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
-
-
-        stats_group.setLayout(stats_layout)
-        self.sidebar_layout.addWidget(stats_group)
-
-        # Visualization Settings 👁️
+    def setup_visualization_settings_group(self):
+        """Sets up the Visualization Settings group box."""
         viz_settings_group = QGroupBox("👁️ Visualization Settings")
         viz_settings_layout = QGridLayout()
 
-        # Visualization Type Selection
+        # Visualization Type
         self.visualization_type_combo = QComboBox()
-        self.visualization_type_combo.addItems(["Token Stream", "Test Square", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
-        self.visualization_type_combo.currentTextChanged.connect(self.opengl_viz_widget.set_visualization_type)
-        viz_settings_layout.addWidget(QLabel("Type:"), 0, 0)
-        viz_settings_layout.addWidget(self.visualization_type_combo, 0, 1)
+        viz_types = ["Token Stream", "Test Square", "Memory Influence Map", "Abstract Token Cloud", "Probability Distribution"]
+        self.visualization_type_combo.addItems(viz_types)
+        self.visualization_type_combo.currentTextChanged.connect(self.on_visualization_type_changed)
+        self.add_widget_to_grid(viz_settings_layout, "Type:", self.visualization_type_combo, 0, 0)
 
-        # Color Scheme Selection (Example Parameter)
+        # Color Scheme
         self.color_scheme_combo = QComboBox()
-        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale", "Rainbow"]) # Example schemes - added Rainbow
-        self.color_scheme_combo.setCurrentText("Cool") # Set default color scheme
+        color_schemes = ["Cool", "Warm", "GrayScale", "Rainbow", "CoolWarm", "Plasma"]
+        self.color_scheme_combo.addItems(color_schemes)
+        self.color_scheme_combo.setCurrentText("Cool")
         self.color_scheme_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
-        viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
-        viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
+        self.add_widget_to_grid(viz_settings_layout, "Color Scheme:", self.color_scheme_combo, 1, 0)
 
+        # Token Shape
+        self.token_shape_combo = QComboBox()
+        token_shapes = ["Circle", "Square", "Triangle", "Line"]
+        self.token_shape_combo.addItems(token_shapes)
+        self.token_shape_combo.setCurrentText("Circle")
+        self.token_shape_combo.currentTextChanged.connect(self.opengl_viz_widget.set_token_shape)
+        self.add_widget_to_grid(viz_settings_layout, "Token Shape:", self.token_shape_combo, 2, 0)
+
+        # Animation Speed
+        self.animation_speed_spin = QDoubleSpinBox()
+        self.animation_speed_spin.setRange(0.001, 0.1); self.animation_speed_spin.setValue(0.01); self.animation_speed_spin.setSingleStep(0.005)
+        self.animation_speed_spin.valueChanged.connect(self.opengl_viz_widget.set_animation_speed)
+        self.add_widget_to_grid(viz_settings_layout, "Animation Speed:", self.animation_speed_spin, 3, 0)
+
+        # Token Size
+        self.token_size_spin = QDoubleSpinBox()
+        self.token_size_spin.setRange(0.01, 0.1); self.token_size_spin.setValue(0.03); self.token_size_spin.setSingleStep(0.005)
+        self.token_size_spin.valueChanged.connect(self.opengl_viz_widget.set_token_size)
+        self.add_widget_to_grid(viz_settings_layout, "Token Size:", self.token_size_spin, 4, 0)
+
+        # Token Spacing
+        self.token_spacing_spin = QDoubleSpinBox()
+        self.token_spacing_spin.setRange(0.01, 0.2); self.token_spacing_spin.setValue(0.07); self.token_spacing_spin.setSingleStep(0.01)
+        self.token_spacing_spin.valueChanged.connect(self.opengl_viz_widget.set_token_spacing)
+        self.add_widget_to_grid(viz_settings_layout, "Token Spacing:", self.token_spacing_spin, 5, 0)
+
+        # Zoom Level
+        self.zoom_level_spin = QDoubleSpinBox()
+        self.zoom_level_spin.setRange(0.1, 5.0); self.zoom_level_spin.setValue(1.0); self.zoom_level_spin.setSingleStep(0.1)
+        self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level)
+        self.add_widget_to_grid(viz_settings_layout, "Zoom Level:", self.zoom_level_spin, 6, 0)
+
+        # Token Data Mode
+        self.token_data_mode_combo = QComboBox()
+        data_modes = ["Decoded Tokens", "Token IDs"]
+        self.token_data_mode_combo.addItems(data_modes)
+        self.token_data_mode_combo.setCurrentText("Decoded Tokens")
+        self.token_data_mode_combo.currentTextChanged.connect(self.on_token_stream_data_mode_changed)
+        self.add_widget_to_grid(viz_settings_layout, "Token Data:", self.token_data_mode_combo, 7, 0)
+
+        # Colormap (for Memory Map)
+        self.colormap_combo = QComboBox()
+        colormap_names = ["Cool", "Warm", "GrayScale", "Rainbow", "CoolWarm", "Plasma"]
+        self.colormap_combo.addItems(colormap_names)
+        self.colormap_combo.setCurrentText("Cool")
+        self.colormap_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
+        self.add_widget_to_grid(viz_settings_layout, "Colormap:", self.colormap_combo, 8, 0)
+
+        # Show Probability Bar
+        self.show_prob_bar_checkbox = QCheckBox("Show Prob. Bar")
+        self.show_prob_bar_checkbox.setChecked(True)
+        self.show_prob_bar_checkbox.stateChanged.connect(lambda state: self.opengl_viz_widget.set_show_probability_bar(state == Qt.CheckState.Checked))
+        self.add_widget_to_grid(viz_settings_layout, "Prob. Bar:", self.show_prob_bar_checkbox, 9, 0)
 
         viz_settings_group.setLayout(viz_settings_layout)
-        self.sidebar_layout.addWidget(viz_settings_group)
+        return viz_settings_group
 
-        # Add stretch to bottom to push groups to the top
+    def setup_generation_parameters_group(self):
+        """Sets up the Generation Parameters group box."""
+        gen_params_group = QGroupBox("⚙️ Generation Parameters")
+        gen_params_layout = QGridLayout()
+
+        # Length
+        self.gen_length_spin = QSpinBox()
+        self.gen_length_spin.setRange(16, 512); self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length']); self.gen_length_spin.setSingleStep(16)
+        self.add_widget_to_grid(gen_params_layout, "Length:", self.gen_length_spin, 0, 0)
+
+        # Steps
+        self.steps_spin = QSpinBox()
+        self.steps_spin.setRange(16, 512); self.steps_spin.setValue(DEFAULT_PARAMS['steps']); self.steps_spin.setSingleStep(16)
+        self.add_widget_to_grid(gen_params_layout, "Steps:", self.steps_spin, 0, 2)
+
+        # Block Length
+        self.block_length_spin = QSpinBox()
+        self.block_length_spin.setRange(16, 256); self.block_length_spin.setValue(DEFAULT_PARAMS['block_length']); self.block_length_spin.setSingleStep(16)
+        self.add_widget_to_grid(gen_params_layout, "Block Length:", self.block_length_spin, 1, 0)
+
+        # Temperature
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0, 2); self.temperature_spin.setValue(DEFAULT_PARAMS['temperature']); self.temperature_spin.setSingleStep(0.1)
+        self.add_widget_to_grid(gen_params_layout, "Temperature:", self.temperature_spin, 1, 2)
+
+        # CFG Scale
+        self.cfg_scale_spin = QDoubleSpinBox()
+        self.cfg_scale_spin.setRange(0, 5); self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale']); self.cfg_scale_spin.setSingleStep(0.1)
+        self.add_widget_to_grid(gen_params_layout, "CFG Scale:", self.cfg_scale_spin, 2, 0, "Classifier-Free Guidance scale")
+
+        # Remasking
+        self.remasking_combo = QComboBox()
+        remasking_methods = ["low_confidence", "random"]
+        self.remasking_combo.addItems(remasking_methods); self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
+        self.add_widget_to_grid(gen_params_layout, "Remasking:", self.remasking_combo, 2, 2, "Method for remasking tokens during generation")
+
+        gen_params_group.setLayout(gen_params_layout)
+        return gen_params_group
+
+    def setup_hardware_memory_group(self):
+        """Sets up the Hardware & Memory Options group box."""
+        hw_memory_group = QGroupBox("⚙️ Hardware & Memory Options")
+        hw_memory_layout = QGridLayout()
+
+        # Device
+        device_label, _ = self._create_labeled_widget("Device:")
+        self.device_group = QButtonGroup()
+        self.cpu_radio = QRadioButton("CPU"); self.gpu_radio = QRadioButton("GPU (CUDA)")
+        if torch.cuda.is_available(): self.gpu_radio.setChecked(True)
+        else: self.cpu_radio.setChecked(True); self.gpu_radio.setEnabled(False)
+        self.device_group.addButton(self.cpu_radio, 0); self.device_group.addButton(self.gpu_radio, 1)
+        hw_memory_layout.addWidget(device_label, 0, 0)
+        hw_memory_layout.addWidget(self.cpu_radio, 0, 1); hw_memory_layout.addWidget(self.gpu_radio, 0, 2)
+
+        # Precision
+        precision_label, _ = self._create_labeled_widget("Precision:")
+        self.precision_group = QButtonGroup()
+        self.use_normal = QRadioButton("Normal"); self.use_8bit = QRadioButton("8-bit"); self.use_4bit = QRadioButton("4-bit")
+        self.use_8bit.setChecked(True)
+        self.precision_group.addButton(self.use_normal, 0); self.precision_group.addButton(self.use_8bit, 1); self.precision_group.addButton(self.use_4bit, 2)
+        hw_memory_layout.addWidget(precision_label, 1, 0)
+        hw_memory_layout.addWidget(self.use_normal, 1, 1); hw_memory_layout.addWidget(self.use_8bit, 1, 2); hw_memory_layout.addWidget(self.use_4bit, 1, 3)
+
+        # Checkboxes
+        self.extreme_mode_checkbox = QCheckBox("Extreme Mode"); self.extreme_mode_checkbox.setToolTip("Enable extreme memory optimizations")
+        self.fast_mode_checkbox = QCheckBox("Fast Mode"); self.fast_mode_checkbox.setToolTip("Enable faster generation (lower quality)")
+        self.enable_memory_checkbox = QCheckBox("Enable Memory Integration"); self.enable_memory_checkbox.setToolTip("Enable memory integration for context-aware generation")
+        hw_memory_layout.addWidget(self.extreme_mode_checkbox, 2, 0, 1, 3)
+        hw_memory_layout.addWidget(self.fast_mode_checkbox, 3, 0, 1, 3)
+        hw_memory_layout.addWidget(self.enable_memory_checkbox, 4, 0, 1, 3)
+
+        # Keep GPU Loaded Checkbox
+        self.keep_gpu_loaded_checkbox = QCheckBox("Keep GPU Loaded");
+        self.keep_gpu_loaded_checkbox.setToolTip("Keep GPU loaded after generation for faster repeat requests (uses more VRAM).");
+        self.keep_gpu_loaded_checkbox.stateChanged.connect(self.on_keep_gpu_loaded_changed)
+        hw_memory_layout.addWidget(self.keep_gpu_loaded_checkbox, 5, 0, 1, 3)
+
+        hw_memory_group.setLayout(hw_memory_layout)
+        return hw_memory_group
+
+    def setup_realtime_stats_group(self):
+        """Sets up the Realtime Statistics group box."""
+        stats_group = QGroupBox("📊 Realtime Statistics")
+        stats_layout = QGridLayout()
+        self.token_rate_label = QLabel("Token Rate: -")
+        self.step_time_label = QLabel("Step Time: - ms/step")
+        self.detailed_memory_label = QLabel("Memory Usage: -")
+        stats_layout.addWidget(self.token_rate_label, 0, 0)
+        stats_layout.addWidget(self.step_time_label, 1, 0)
+        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
+        stats_group.setLayout(stats_layout)
+        return stats_group
+
+    def setup_memory_status_group(self):
+        """Sets up the Memory Status group box."""
+        memory_status_group = QGroupBox("💾 Memory Status")
+        memory_status_layout = QGridLayout()
+
+        # System RAM
+        self.system_ram_progress_sidebar = QProgressBar(); self.system_ram_progress_sidebar.setRange(0, 100); self.system_ram_progress_sidebar.setTextVisible(False)
+        self.system_ram_label_sidebar = QLabel("- / - GB (-%)")
+        self.add_widget_to_grid(memory_status_layout, "System RAM:", self.system_ram_progress_sidebar, 0, 0)
+        memory_status_layout.addWidget(self.system_ram_label_sidebar, 0, 2)
+
+        # GPU VRAM
+        self.gpu_vram_progress_sidebar = QProgressBar(); self.gpu_vram_progress_sidebar.setRange(0, 100); self.gpu_vram_progress_sidebar.setTextVisible(False)
+        self.gpu_vram_label_sidebar = QLabel("- / - GB (-%)")
+        self.add_widget_to_grid(memory_status_layout, "GPU VRAM:", self.gpu_vram_progress_sidebar, 1, 0)
+        memory_status_layout.addWidget(self.gpu_vram_label_sidebar, 1, 2)
+
+        memory_status_group.setLayout(memory_status_layout)
+        return memory_status_group
+
+    def setup_ui(self):
+        """Sets up the main UI layout."""
+        main_widget = QSplitter(Qt.Orientation.Vertical)
+
+        # Prompt Input
+        self.prompt_input = QTextEdit(); self.prompt_input.setPlaceholderText("Enter your prompt here...")
+        main_widget.addWidget(self.prompt_input)
+
+        # Center Splitter (Visualization and Sidebar)
+        center_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_widget.addWidget(center_splitter)
+
+        # OpenGL Visualization Widget
+        self.opengl_viz_widget = GLVisualizationWidget(self)
+        center_splitter.addWidget(self.opengl_viz_widget)
+
+        # Sidebar Scroll Area
+        self.sidebar_scroll_area = QScrollArea(); self.sidebar_scroll_area.setWidgetResizable(True)
+        self.sidebar_widget = QWidget(); self.sidebar_layout = QVBoxLayout(self.sidebar_widget)
+        self.sidebar_scroll_area.setWidget(self.sidebar_widget)
+        center_splitter.addWidget(self.sidebar_scroll_area)
+        center_splitter.setSizes([600, 600]); main_widget.setSizes([175, 725])
+
+        # Add Group Boxes to Sidebar
+        self.sidebar_layout.addWidget(self.setup_visualization_settings_group())
+        self.sidebar_layout.addWidget(self.setup_generation_parameters_group())
+        self.sidebar_layout.addWidget(self.setup_hardware_memory_group())
+        self.sidebar_layout.addWidget(self.setup_realtime_stats_group())
+        self.sidebar_layout.addWidget(self.setup_memory_status_group())
         self.sidebar_layout.addStretch(1)
 
+        # Status Bar
+        self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready")
+
+        # Status Bar Buttons
+        self.generate_button_status_bar = QPushButton("Generate"); self.generate_button_status_bar.clicked.connect(self.on_generate_clicked)
+        self.stop_button_status_bar = QPushButton("Stop"); self.stop_button_status_bar.clicked.connect(self.on_stop_clicked); self.stop_button_status_bar.setEnabled(False)
+        self.clear_button_status_bar = QPushButton("Clear"); self.clear_button_status_bar.clicked.connect(self.clear_output)
+        status_button_layout = QHBoxLayout(); status_button_layout.addStretch(1)
+        status_button_layout.addWidget(self.generate_button_status_bar); status_button_layout.addWidget(self.stop_button_status_bar); status_button_layout.addWidget(self.clear_button_status_bar)
+        status_button_widget = QWidget(); status_button_widget.setLayout(status_button_layout)
+        self.status_bar.addPermanentWidget(status_button_widget)
+
+        # Status Bar Memory Indicators
+        self.ram_indicator = QProgressBar(); self.ram_indicator.setMaximumWidth(70); self.ram_indicator.setTextVisible(False)
+        self.gpu_indicator = QProgressBar(); self.gpu_indicator.setMaximumWidth(70); self.gpu_indicator.setTextVisible(False)
+        self.status_bar.addPermanentWidget(QLabel("RAM:")); self.status_bar.addPermanentWidget(self.ram_indicator)
+        self.status_bar.addPermanentWidget(QLabel("VRAM:")); self.status_bar.addPermanentWidget(self.gpu_indicator)
+
+        self.setCentralWidget(main_widget)
+
+    def on_visualization_type_changed(self, viz_type):
+        """Handles changes to the visualization type combo box."""
+        self.opengl_viz_widget.set_visualization_type(viz_type)
+        is_token_stream = viz_type == "Token Stream"
+        is_memory_map = viz_type == "Memory Influence Map"
+        self.token_shape_combo.setEnabled(is_token_stream)
+        self.animation_speed_spin.setEnabled(is_token_stream or viz_type == "Abstract Token Cloud")
+        self.token_size_spin.setEnabled(is_token_stream)
+        self.token_spacing_spin.setEnabled(is_token_stream)
+        self.token_data_mode_combo.setEnabled(is_token_stream)
+        self.colormap_combo.setEnabled(is_memory_map)
+        self.show_prob_bar_checkbox.setEnabled(is_token_stream)
+
+    def on_token_stream_data_mode_changed(self, mode):
+        """Handles changes to the token stream data mode combo box."""
+        self.token_stream_data_mode = mode
+        self.opengl_viz_widget.set_token_stream_data_mode(mode)
+
+    def on_keep_gpu_loaded_changed(self, state):
+        """Handles changes to the 'Keep GPU Loaded' checkbox."""
+        self.keep_gpu_loaded = (state == Qt.CheckState.Checked)
+        print(f"Keep GPU Loaded Checkbox changed: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
+        if self.keep_gpu_loaded:
+            self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup if keeping GPU loaded
+
     def get_generation_config(self):
-        """Get the current generation configuration from UI elements."""
+        """Collects generation parameters from UI elements."""
         device = 'cuda' if self.gpu_radio.isChecked() and torch.cuda.is_available() else 'cpu'
         return {
-            'gen_length': self.gen_length_spin.value(),
-            'steps': self.steps_spin.value(),
-            'block_length': self.block_length_spin.value(),
-            'temperature': self.temperature_spin.value(),
-            'cfg_scale': self.cfg_scale_spin.value(),
-            'remasking': self.remasking_combo.currentText(),
-            'device': device,
-            'use_8bit': self.use_8bit.isChecked() and device == 'cuda',
-            'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
-            'extreme_mode': self.extreme_mode_checkbox.isChecked(),
+            'gen_length': self.gen_length_spin.value(), 'steps': self.steps_spin.value(), 'block_length': self.block_length_spin.value(),
+            'temperature': self.temperature_spin.value(), 'cfg_scale': self.cfg_scale_spin.value(), 'remasking': self.remasking_combo.currentText(),
+            'device': device, 'use_8bit': self.use_8bit.isChecked() and device == 'cuda', 'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
+            'extreme_mode': self.extreme_mode_checkbox.isChecked(), 'fast_mode': self.fast_mode_checkbox.isChecked(),
             'use_memory': self.enable_memory_checkbox.isChecked()
         }
 
+    def start_gpu_cleanup_timer(self):
+        """Starts the GPU cleanup timer with a delay."""
+        if self.cleanup_timer.isActive(): # Use self.cleanup_timer here
+            print("GPU cleanup timer already active, stopping and restarting.") # DEBUG
+            self.cleanup_timer.stop() # Stop any existing timer
+        print("Starting GPU cleanup timer.") # DEBUG
+        self.cleanup_timer.start(self.gpu_cleanup_delay)
+        self.status_bar.showMessage("GPU memory cleanup scheduled in 5 minutes...")
+
+    def cancel_gpu_cleanup_timer(self):
+        """Cancels the GPU cleanup timer if it's active."""
+        if self.cleanup_timer.isActive(): # Use self.cleanup_timer here
+            print("Cancelling GPU cleanup timer.") # DEBUG
+            self.cleanup_timer.stop()
+            self.status_bar.showMessage("GPU memory cleanup cancelled.")
+        else:
+            print("GPU cleanup timer is not active, nothing to cancel.") # DEBUG
+
+    @pyqtSlot()
+    def _delayed_cleanup_gpu_memory(self): # Changed to _delayed_cleanup_gpu_memory
+        """Initiates GPU memory cleanup via worker signal."""
+        print("_delayed_cleanup_gpu_memory() timer event. self.keep_gpu_loaded:", self.keep_gpu_loaded) # DEBUG
+        if self.keep_gpu_loaded: # Do not cleanup if user wants to keep GPU loaded - double check here as well
+            print("GPU cleanup skipped due to 'Keep GPU Loaded' setting on timer event.") # DEBUG
+            return
+        self.status_bar.showMessage("Initiating GPU memory cleanup...")
+        if self.worker:
+            print("Emitting cleanup_memory_signal to worker from timer.") # DEBUG
+            self.worker.cleanup_memory_signal.emit() # Emit signal to worker to perform cleanup
+        else:
+            print("Warning: No worker to signal for cleanup on timer event.") # Fallback in case worker is None
+            self.status_bar.showMessage("Warning: No worker to signal for cleanup.")
+        print("_delayed_cleanup_gpu_memory() finished.") # DEBUG
+
+
     @pyqtSlot()
     def on_generate_clicked(self):
-        """Handle Generate button click: start generation."""
+        """Handles the 'Generate' button click event."""
         prompt_text = self.prompt_input.toPlainText().strip()
         if not prompt_text:
             QMessageBox.warning(self, "Input Error", "Please enter a prompt.")
             return
 
         config = self.get_generation_config()
-
-        # Disable UI elements and enable stop button
         self.set_ui_generating(True)
-
-        # Create worker thread and connect signals
-        self.worker = LLaDAWorker(prompt_text, config) # Pass config
-        self.worker.progress.connect(self.update_progress) # Connect progress signal
-        self.worker.step_update.connect(self.update_visualization) # Connect step_update
-        self.worker.finished.connect(self.generation_finished) # Connect finished signal
-        self.worker.error.connect(self.generation_error) # Connect error signal
-        self.worker.start() # Start the worker thread
+        self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup on new generate request
+        print(f"on_generate_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
+        self.worker = LLaDAWorker(prompt_text, config) # Create new worker for each generate click
+        self.worker.progress.connect(self.update_progress)
+        self.worker.step_update.connect(self.update_visualization)
+        self.worker.finished.connect(self.generation_finished)
+        self.worker.error.connect(self.generation_error)
+        self.worker.realtime_stats.connect(self.update_realtime_stats_display)
+        self.worker.memory_influence_update.connect(self.opengl_viz_widget.set_memory_influence_data)
+        self.worker.cleanup_memory_signal.connect(self._delayed_cleanup_gpu_memory) # Connect signal to timer slot in main thread!
+        self.worker.start()
 
     @pyqtSlot()
     def on_stop_clicked(self):
-        """Handle Stop button click: stop generation."""
+        """Handles the 'Stop' button click event."""
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.set_ui_generating(False) # Re-enable UI, keep stop disabled
+            self.set_ui_generating(False)
+            print(f"on_stop_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
+            if not self.keep_gpu_loaded:
+                self.start_gpu_cleanup_timer() # Schedule cleanup on stop if not keeping loaded
 
     @pyqtSlot(int, str, dict)
     def update_progress(self, progress_percent, message, data):
-        """Update progress bar and status message during generation."""
+        """Updates the progress status in the status bar."""
         self.status_bar.showMessage(f"Generating - {message}")
-        # Placeholder for progress bar update if we add one to status bar
 
-    @pyqtSlot(int, list, list, list)
-    def update_visualization(self, step, tokens, masks, confidences):
-        """Update visualization during each step."""
-        # For now, just print step info to console - replace with OpenGL viz update later
-        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
-        # self.opengl_viz_widget.set_token_stream_data(tokens) # Example of sending data to OpenGL widget
+    @pyqtSlot(int, list, list, list, list, list) # Added step_confidences to slot signature
+    def update_visualization(self, step, tokens, masks, confidences, token_ids, step_confidences): # Added step_confidences
+        """Updates the OpenGL visualization based on generation step data."""
+        print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}..., Step Confidences: {step_confidences[:2]}...") # Added step_confidences to debug print
+        if self.opengl_viz_widget.visualization_type == "Token Stream":
+            data_to_visualize = tokens if self.token_stream_data_mode == "Decoded Tokens" else token_ids
+            self.opengl_viz_widget.set_token_stream_data(data_to_visualize, masks, confidences, self.token_stream_data_mode)
+        elif self.opengl_viz_widget.visualization_type == "Memory Influence Map":
+            self.opengl_viz_widget.set_memory_influence_data(np.random.rand(32, 32)) # Placeholder data
 
     @pyqtSlot(str)
     def generation_finished(self, output_text):
-        """Handle generation finished signal."""
+        """Handles the generation finished signal."""
         self.status_bar.showMessage("Generation Finished")
-        # For now, print output to console - replace with proper output display later
         print(f"Generated Output: {output_text}")
-        self.prompt_input.setPlainText(output_text) # Just for testing, replace with proper output display later
-        self.set_ui_generating(False) # Re-enable UI
+        self.prompt_input.setPlainText(output_text)
+        self.set_ui_generating(False)
+        print(f"generation_finished: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
+        if not self.keep_gpu_loaded:
+            self.start_gpu_cleanup_timer() # Schedule cleanup after generation if not keeping loaded
 
     @pyqtSlot(str)
     def generation_error(self, error_message):
-        """Handle generation error signal."""
+        """Handles the generation error signal."""
         self.status_bar.showMessage(f"Generation Error: {error_message}")
         QMessageBox.critical(self, "Generation Error", f"Error: {error_message}")
-        self.set_ui_generating(False) # Re-enable UI
+        self.set_ui_generating(False)
+        print(f"generation_error: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
+        if not self.keep_gpu_loaded: # Still schedule cleanup even on error, to free resources
+             self.start_gpu_cleanup_timer()
 
     def set_ui_generating(self, is_generating):
-        """Enable/disable UI elements based on generation status."""
-        self.generate_button_status_bar.setEnabled(not is_generating)
+        """Enables/disables UI elements based on generation status."""
+        ui_elements = [
+            self.generate_button_status_bar, self.prompt_input, self.visualization_type_combo,
+            self.color_scheme_combo, self.token_shape_combo, self.animation_speed_spin,
+            self.token_size_spin, self.token_spacing_spin, self.zoom_level_spin,
+            self.token_data_mode_combo, self.gen_length_spin, self.steps_spin,
+            self.block_length_spin, self.temperature_spin, self.cfg_scale_spin,
+            self.remasking_combo, self.cpu_radio, self.gpu_radio, self.use_normal,
+            self.use_8bit, self.use_4bit, self.extreme_mode_checkbox, self.fast_mode_checkbox,
+            self.enable_memory_checkbox, self.colormap_combo, self.show_prob_bar_checkbox,
+            self.keep_gpu_loaded_checkbox
+        ]
+        for element in ui_elements:
+            if element is not self.stop_button_status_bar:
+                element.setEnabled(not is_generating)
+
         self.stop_button_status_bar.setEnabled(is_generating)
-        self.prompt_input.setEnabled(not is_generating)
-        # ... (Add other UI elements to disable as needed)
+        self.token_shape_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
+        self.token_data_mode_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
+        self.colormap_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Memory Influence Map")
+        self.show_prob_bar_checkbox.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
+
+
+    @pyqtSlot(dict)
+    def update_realtime_stats_display(self, stats):
+        """Updates the realtime statistics display."""
+        self.token_rate_label.setText(f"Token Rate: {stats.get('token_rate', '-')}")
+        self.step_time_label.setText(f"Step Time: {stats.get('step_time', '-')} ms/step")
+        self.detailed_memory_label.setText(f"Memory Usage: {stats.get('memory_usage', '-')}")
+
+    @pyqtSlot()
+    def clear_output(self):
+        """Clears the output and resets visualization settings."""
+        self.prompt_input.clear()
+        self.opengl_viz_widget.set_visualization_type("Token Stream")
+        self.opengl_viz_widget.set_color_scheme("Cool")
+        self.opengl_viz_widget.set_token_shape("Circle")
+        self.opengl_viz_widget.set_animation_speed(0.01)
+        self.opengl_viz_widget.set_token_size(0.03)
+        self.opengl_viz_widget.set_token_spacing(0.07)
+        self.zoom_level_spin.setValue(1.0)
+        self.opengl_viz_widget.set_zoom_level(1.0)
+        self.token_data_mode_combo.setCurrentText("Decoded Tokens")
+        self.colormap_combo.setCurrentText("Cool")
+        self.show_prob_bar_checkbox.setChecked(True)
+        self.cancel_gpu_cleanup_timer() # Cancel cleanup on clear
+
+    @pyqtSlot(dict)
+    def update_memory_status_bar(self, memory_stats):
+        """Updates the memory status bar indicators."""
+        system_percent = memory_stats.get('system_percent', 0)
+        gpu_percent = memory_stats.get('gpu_percent', 0)
+        system_used = memory_stats.get('system_used', 0)
+        system_total = memory_stats.get('system_total', 0)
+        gpu_used = memory_stats.get('gpu_used', 0)
+        gpu_total = memory_stats.get('gpu_total', 0)
+        gpu_available = memory_stats.get('gpu_available', False)
+        self.ram_indicator.setValue(int(system_percent))
+        self.gpu_indicator.setValue(int(gpu_percent))
+        self.system_ram_progress_sidebar.setValue(int(system_percent))
+        self.gpu_vram_progress_sidebar.setValue(int(gpu_percent))
+        self.system_ram_label_sidebar.setText(f"{system_used:.2f} / {system_total:.2f} GB ({system_percent:.0f}%)")
+        self.gpu_vram_label_sidebar.setText(f"{gpu_used:.2f} / {gpu_total:.2f} GB ({gpu_percent:.0f}%)" if gpu_available else "N/A")
+
+    def save_settings(self):
+        """Saves GUI settings to QSettings."""
+        settings = QSettings("LLaDA_GUI", "LLaDA_GUI")
+        settings.setValue("visualization_type", self.visualization_type_combo.currentText())
+        settings.setValue("color_scheme", self.color_scheme_combo.currentText())
+        settings.setValue("token_shape", self.token_shape_combo.currentText())
+        settings.setValue("animation_speed", self.animation_speed_spin.value())
+        settings.setValue("token_size", self.token_size_spin.value())
+        settings.setValue("token_spacing", self.token_spacing_spin.value())
+        settings.setValue("zoom_level", self.zoom_level_spin.value())
+        settings.setValue("gen_length", self.gen_length_spin.value())
+        settings.setValue("steps", self.steps_spin.value())
+        settings.setValue("block_length", self.block_length_spin.value())
+        settings.setValue("temperature", self.temperature_spin.value())
+        settings.setValue("cfg_scale", self.cfg_scale_spin.value())
+        settings.setValue("remasking", self.remasking_combo.currentText())
+        settings.setValue("device", "cuda" if self.gpu_radio.isChecked() else "cpu")
+        settings.setValue("use_8bit", self.use_8bit.isChecked())
+        settings.setValue("use_4bit", self.use_4bit.isChecked())
+        settings.setValue("extreme_mode", self.extreme_mode_checkbox.isChecked())
+        settings.setValue("fast_mode", self.fast_mode_checkbox.isChecked())
+        settings.setValue("use_memory", self.enable_memory_checkbox.isChecked())
+        settings.setValue("token_stream_data_mode", self.token_data_mode_combo.currentText())
+        settings.setValue("colormap", self.colormap_combo.currentText())
+        settings.setValue("show_prob_bar", self.show_prob_bar_checkbox.isChecked())
+        settings.setValue("keep_gpu_loaded", self.keep_gpu_loaded_checkbox.isChecked())
+
+    def load_settings(self):
+        """Loads GUI settings from QSettings."""
+        settings = QSettings("MyCompany", "LLaDAGUI")
+        self.visualization_type_combo.setCurrentText(settings.value("visualization_type", "Token Stream"))
+        self.color_scheme_combo.setCurrentText(settings.value("color_scheme", "Cool"))
+        self.token_shape_combo.setCurrentText(settings.value("token_shape", "Circle"))
+        self.animation_speed_spin.setValue(float(settings.value("animation_speed", 0.01)))
+        self.token_size_spin.setValue(float(settings.value("token_size", 0.03)))
+        self.token_spacing_spin.setValue(float(settings.value("token_spacing", 0.07)))
+        self.zoom_level_spin.setValue(float(settings.value("zoom_level", 1.0)))
+        self.gen_length_spin.setValue(int(settings.value("gen_length", DEFAULT_PARAMS['gen_length'])))
+        self.steps_spin.setValue(int(settings.value("steps", DEFAULT_PARAMS['steps'])))
+        self.block_length_spin.setValue(int(settings.value("block_length", DEFAULT_PARAMS['block_length'])))
+        self.temperature_spin.setValue(float(settings.value("temperature", DEFAULT_PARAMS['temperature'])))
+        self.cfg_scale_spin.setValue(float(settings.value("cfg_scale", DEFAULT_PARAMS['cfg_scale'])))
+        self.remasking_combo.setCurrentText(settings.value("remasking", DEFAULT_PARAMS['remasking']))
+        device = settings.value("device", "cuda" if torch.cuda.is_available() else "cpu")
+        if device == "cuda" and torch.cuda.is_available(): self.gpu_radio.setChecked(True)
+        else: self.cpu_radio.setChecked(True)
+        self.use_8bit.setChecked(bool(settings.value("use_8bit", True)))
+        self.use_4bit.setChecked(bool(settings.value("use_4bit", False)))
+        self.extreme_mode_checkbox.setChecked(bool(settings.value("extreme_mode", False)))
+        self.fast_mode_checkbox.setChecked(bool(settings.value("fast_mode", False)))
+        self.enable_memory_checkbox.setChecked(bool(settings.value("use_memory", False)))
+        self.token_data_mode_combo.setCurrentText(settings.value("token_stream_data_mode", "Decoded Tokens"))
+        self.colormap_combo.setCurrentText(settings.value("colormap", "Cool"))
+        self.show_prob_bar_checkbox.setChecked(bool(settings.value("show_prob_bar", True)))
+        self.keep_gpu_loaded_checkbox.setChecked(bool(settings.value("keep_gpu_loaded", False)))
+
+    def closeEvent(self, event):
+        """Handles the window close event."""
+        self.save_settings()
+        self.memory_monitor.stop()
+        self.cancel_gpu_cleanup_timer()
+        if not self.keep_gpu_loaded:
+            self._delayed_cleanup_gpu_memory() # Call delayed cleanup on close as well, to be safe
+        event.accept()
 
 
 def main():
-    """Main application entry point."""
     app = QApplication(sys.argv)
     window = LLaDAGUINew()
     window.show()
