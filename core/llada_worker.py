@@ -307,7 +307,7 @@ class LLaDAWorker(QThread):
                 model_path, trust_remote_code=True, torch_dtype=dtype,
                 device_map="auto" if device == 'cuda' else None, cache_dir="data",
                 low_cpu_mem_usage=True,
-                **( {'attn_implementation': 'flash_attention_2'} if device == 'cuda' else {} )
+                **( {'attn_implementation': 'flash_attention_2', 'torch_compile': True} if device == 'cuda' else {} ) # Conditionally enable FlashAttention-2 and torch_compile
             )
 
             # Resize embeddings for special tokens if needed
