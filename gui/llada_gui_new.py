@@ -209,29 +209,45 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def draw_memory_influence_map(self):
         """Draw Memory Influence Map visualization."""
-        grid_size = 10 # Example grid size
-        cell_size = 2.0 / grid_size # Normalized cell size
+        grid_resolution = 32  # Increased resolution for smoother map
+        influence_data = np.random.rand(grid_resolution, grid_resolution) # Generate random influence data
 
-        for row in range(grid_size):
-            for col in range(grid_size):
-                # Calculate position for each cell
-                x = -1.0 + col * cell_size + cell_size / 2.0
-                y = 1.0 - row * cell_size - cell_size / 2.0
+        # Get color scheme for mapping
+        cmap = self.get_colormap(self.color_scheme)
 
-                # Generate a random influence value for demonstration
-                influence = random.random() # 0.0 to 1.0
+        # Ensure data is in [0, 1] range and map to colors
+        normalized_data = (influence_data - influence_data.min()) / (influence_data.max() - influence_data.min() + 1e-8) # Normalize to [0, 1]
+        colors = cmap(normalized_data.flatten()) # Get colors, flattened for easier indexing
 
-                # Choose color based on influence (example: grayscale)
-                gray_scale = 0.3 + influence * 0.7 # Map 0-1 to gray scale range
-                glColor3f(gray_scale, gray_scale, gray_scale)
+        cell_size = 2.0 / grid_resolution
+        glBegin(GL_QUADS) # Use quads for grid cells
+        for i in range(grid_resolution):
+            for j in range(grid_resolution):
+                x = -1.0 + j * cell_size
+                y = 1.0 - i * cell_size
+                # Get color for current cell from colormap
+                color = colors[i * grid_resolution + j] # Index into flattened color array
+                glColor4f(color[0], color[1], color[2], 1.0) # Use RGBA from colormap
 
-                # Draw a square for each cell
-                glBegin(GL_QUADS)
-                glVertex2f(x - cell_size / 2.0, y - cell_size / 2.0) # bottom-left
-                glVertex2f(x + cell_size / 2.0, y - cell_size / 2.0) # bottom-right
-                glVertex2f(x + cell_size / 2.0, y + cell_size / 2.0) # top-right
-                glVertex2f(x - cell_size / 2.0, y + cell_size / 2.0) # top-left
-                glEnd()
+                glVertex2f(x, y) # Top-left
+                glVertex2f(x + cell_size, y) # Top-right
+                glVertex2f(x + cell_size, y - cell_size) # Bottom-right
+                glVertex2f(x, y - cell_size) # Bottom-left
+        glEnd()
+
+
+    def get_colormap(self, scheme_name="Cool"):
+        """Get colormap based on scheme name."""
+        if scheme_name == "Cool":
+            return plt.cm.viridis # Example: viridis for 'Cool'
+        elif scheme_name == "Warm":
+            return plt.cm.magma # Example: magma for 'Warm'
+        elif scheme_name == "GrayScale":
+            return plt.cm.gray # Example: grayscale
+        elif scheme_name == "Rainbow":
+            return plt.cm.rainbow # Example: rainbow
+        else:
+            return plt.cm.viridis # Default fallback
 
 
     def draw_abstract_token_cloud(self):
@@ -445,8 +461,199 @@ class LLaDAGUINew(QMainWindow):
     def add_sidebar_sections(self):
         """Adds placeholder sections to the sidebar."""
 
-        # ... (rest of add_sidebar_sections method is unchanged)
+        # Generation Settings ⚙️
+        generation_group = QGroupBox("⚙️ Generation Settings")
+        generation_layout = QGridLayout() # Use GridLayout for better organization
 
+        # Generation Length
+        self.gen_length_spin = QSpinBox()
+        self.gen_length_spin.setRange(16, 512)
+        self.gen_length_spin.setValue(DEFAULT_PARAMS['gen_length'])
+        self.gen_length_spin.setSingleStep(16)
+        generation_layout.addWidget(QLabel("Length:"), 0, 0)
+        generation_layout.addWidget(self.gen_length_spin, 0, 1)
+
+        # Sampling Steps
+        self.steps_spin = QSpinBox()
+        self.steps_spin.setRange(16, 512)
+        self.steps_spin.setValue(DEFAULT_PARAMS['steps'])
+        self.steps_spin.setSingleStep(16)
+        generation_layout.addWidget(QLabel("Steps:"), 1, 0)
+        generation_layout.addWidget(self.steps_spin, 1, 1)
+
+        # Block Length
+        self.block_length_spin = QSpinBox()
+        self.block_length_spin.setRange(16, 256)
+        self.block_length_spin.setValue(DEFAULT_PARAMS['block_length'])
+        self.block_length_spin.setSingleStep(16)
+        generation_layout.addWidget(QLabel("Block Size:"), 2, 0)
+        generation_layout.addWidget(self.block_length_spin, 2, 1)
+
+        # Temperature
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0, 2)
+        self.temperature_spin.setValue(DEFAULT_PARAMS['temperature'])
+        self.temperature_spin.setSingleStep(0.1)
+        generation_layout.addWidget(QLabel("Temperature:"), 3, 0)
+        generation_layout.addWidget(self.temperature_spin, 3, 1)
+
+        # CFG Scale
+        self.cfg_scale_spin = QDoubleSpinBox()
+        self.cfg_scale_spin.setRange(0, 5)
+        self.cfg_scale_spin.setValue(DEFAULT_PARAMS['cfg_scale'])
+        self.cfg_scale_spin.setSingleStep(0.1)
+        generation_layout.addWidget(QLabel("CFG Scale:"), 4, 0)
+        generation_layout.addWidget(self.cfg_scale_spin, 4, 1)
+
+        # Remasking Strategy
+        self.remasking_combo = QComboBox()
+        self.remasking_combo.addItems(["low_confidence", "random"])
+        self.remasking_combo.setCurrentText(DEFAULT_PARAMS['remasking'])
+        generation_layout.addWidget(QLabel("Remasking:"), 5, 0)
+        generation_layout.addWidget(self.remasking_combo, 5, 1)
+
+        generation_group.setLayout(generation_layout)
+        self.sidebar_layout.addWidget(generation_group)
+
+        # Model & Hardware 🧠
+        model_group = QGroupBox("🧠 Model & Hardware")
+        model_layout = QGridLayout()
+
+        # Device Selection
+        device_layout = QHBoxLayout()
+        self.cpu_radio = QRadioButton("CPU")
+        self.gpu_radio = QRadioButton("GPU (CUDA)")
+        self.device_group = QButtonGroup()
+        self.device_group.addButton(self.cpu_radio)
+        self.device_group.addButton(self.gpu_radio)
+        device_layout.addWidget(self.cpu_radio)
+        device_layout.addWidget(self.gpu_radio)
+        model_layout.addWidget(QLabel("Device:"), 0, 0)
+        model_layout.addLayout(device_layout, 0, 1)
+
+        # Precision Options
+        precision_layout = QHBoxLayout()
+        self.normal_precision_radio = QRadioButton("Normal")
+        self.quant_8bit_radio = QRadioButton("8-bit")
+        self.quant_4bit_radio = QRadioButton("4-bit")
+        self.precision_group = QButtonGroup()
+        self.precision_group.addButton(self.normal_precision_radio)
+        self.precision_group.addButton(self.quant_8bit_radio)
+        self.precision_group.addButton(self.quant_4bit_radio)
+        precision_layout.addWidget(self.normal_precision_radio)
+        precision_layout.addWidget(self.quant_8bit_radio)
+        precision_layout.addWidget(self.quant_4bit_radio)
+        model_layout.addWidget(QLabel("Precision:"), 1, 0)
+        model_layout.addLayout(precision_layout, 1, 1)
+
+        # Extreme Mode Checkbox
+        self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
+        model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
+
+        # Fast Mode Checkbox
+        self.fast_mode_checkbox = QCheckBox("Fast Mode")
+        model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
+
+
+        model_group.setLayout(model_layout)
+        self.sidebar_layout.addWidget(model_group)
+
+        # Memory Integration 💾
+        memory_group = QGroupBox("💾 Memory Integration")
+        memory_layout = QVBoxLayout()
+        memory_layout.addWidget(QLabel("Memory Options Here"))  # Placeholder
+        memory_group.setLayout(memory_layout)
+        self.sidebar_layout.addWidget(memory_group)
+
+        # Realtime Statistics 📊
+        stats_group = QGroupBox("📊 Realtime Statistics")
+        stats_layout = QGridLayout()
+
+        # Token Rate Display
+        self.token_rate_label = QLabel("Token Rate: - tokens/s")
+        stats_layout.addWidget(self.token_rate_label, 0, 0)
+
+        # Step Time Display
+        self.step_time_label = QLabel("Step Time: - ms/step")
+        stats_layout.addWidget(self.step_time_label, 1, 0)
+
+        # Detailed Memory Usage Display (Placeholder - expandable later)
+        self.detailed_memory_label = QLabel("Memory Usage: - ")
+        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
+
+
+        stats_group.setLayout(stats_layout)
+        self.sidebar_layout.addWidget(stats_group)
+
+        # Visualization Settings 👁️
+        viz_settings_group = QGroupBox("👁️ Visualization Settings")
+        viz_settings_layout = QGridLayout()
+
+        # Visualization Type Selection
+        self.visualization_type_combo = QComboBox()
+        self.visualization_type_combo.addItems(["Token Stream", "Test Square", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
+        self.visualization_type_combo.currentTextChanged.connect(self.opengl_viz_widget.set_visualization_type)
+        viz_settings_layout.addWidget(QLabel("Type:"), 0, 0)
+        viz_settings_layout.addWidget(self.visualization_type_combo, 0, 1)
+
+        # Color Scheme Selection
+        self.color_scheme_combo = QComboBox()
+        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale", "Rainbow"])
+        self.color_scheme_combo.setCurrentText("Cool")
+        self.color_scheme_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
+        viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
+        viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
+
+        # Token Shape Selection
+        self.token_shape_combo = QComboBox()
+        self.token_shape_combo.addItems(["Circle", "Square", "Triangle", "Line"])
+        self.token_shape_combo.setCurrentText("Circle")
+        self.token_shape_combo.currentTextChanged.connect(self.opengl_viz_widget.set_token_shape)
+        viz_settings_layout.addWidget(QLabel("Token Shape:"), 2, 0)
+        viz_settings_layout.addWidget(self.token_shape_combo, 2, 1)
+
+        # Animation Speed Control
+        self.animation_speed_spin = QDoubleSpinBox()
+        self.animation_speed_spin.setRange(0.001, 0.1)
+        self.animation_speed_spin.setValue(0.01)
+        self.animation_speed_spin.setSingleStep(0.005)
+        self.animation_speed_spin.valueChanged.connect(self.opengl_viz_widget.set_animation_speed)
+        viz_settings_layout.addWidget(QLabel("Animation Speed:"), 3, 0)
+        viz_settings_layout.addWidget(self.animation_speed_spin, 3, 1)
+
+        # Token Size Control
+        self.token_size_spin = QDoubleSpinBox()
+        self.token_size_spin.setRange(0.01, 0.1)
+        self.token_size_spin.setValue(0.03)
+        self.token_size_spin.setSingleStep(0.005)
+        self.token_size_spin.valueChanged.connect(self.opengl_viz_widget.set_token_size)
+        viz_settings_layout.addWidget(QLabel("Token Size:"), 4, 0)
+        viz_settings_layout.addWidget(self.token_size_spin, 4, 1)
+
+        # Token Spacing Control
+        self.token_spacing_spin = QDoubleSpinBox()
+        self.token_spacing_spin.setRange(0.01, 0.2)
+        self.token_spacing_spin.setValue(0.07)
+        self.token_spacing_spin.setSingleStep(0.01)
+        self.token_spacing_spin.valueChanged.connect(self.opengl_viz_widget.set_token_spacing)
+        viz_settings_layout.addWidget(QLabel("Token Spacing:"), 5, 0)
+        viz_settings_layout.addWidget(self.token_spacing_spin, 5, 1)
+
+        # Zoom Level Control
+        self.zoom_level_spin = QDoubleSpinBox()
+        self.zoom_level_spin.setRange(0.1, 5.0)
+        self.zoom_level_spin.setValue(1.0)
+        self.zoom_level_spin.setSingleStep(0.1)
+        self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level) # Connect zoom spinbox
+        viz_settings_layout.addWidget(QLabel("Zoom Level:"), 6, 0)
+        viz_settings_layout.addWidget(self.zoom_level_spin, 6, 1)
+
+
+        viz_settings_group.setLayout(viz_settings_layout)
+        self.sidebar_layout.addWidget(viz_settings_group)
+
+        # Add stretch to bottom to push groups to the top
+        self.sidebar_layout.addStretch(1)
 
     def get_generation_config(self):
         """Get the current generation configuration from UI elements."""
@@ -563,6 +770,7 @@ class LLaDAGUINew(QMainWindow):
 
 def main():
     """Main application entry point."""
+    import matplotlib.pyplot as plt # Import matplotlib here, only when GUI is run
     app = QApplication(sys.argv)
     window = LLaDAGUINew()
     window.show()
@@ -570,4 +778,5 @@ def main():
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt # Import matplotlib for colormap
     main()
