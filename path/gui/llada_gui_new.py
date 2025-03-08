@@ -791,9 +791,7 @@ class LLaDAGUINew(QMainWindow):
         self.token_data_mode_combo.setCurrentText("Decoded Tokens")
         self.colormap_combo.setCurrentText("Cool")
         self.show_prob_bar_checkbox.setChecked(True)
-        # Cancel cleanup on clear, regardless of keep_gpu_loaded. Clearing implies a fresh start.
-        self.cancel_gpu_cleanup_timer()
-        print("GPU cleanup timer cancelled on 'Clear'.")
+        self.cancel_gpu_cleanup_timer() # Cancel cleanup on clear
 
     @pyqtSlot(dict)
     def update_memory_status_bar(self, memory_stats):
@@ -873,11 +871,8 @@ class LLaDAGUINew(QMainWindow):
         self.save_settings()
         self.memory_monitor.stop()
         self.cancel_gpu_cleanup_timer()
-        if not self.keep_gpu_loaded: # Only cleanup on close if NOT keeping loaded
+        if not self.keep_gpu_loaded:
             self._delayed_cleanup_gpu_memory() # Call delayed cleanup on close as well, to be safe
-        else:
-            print("GPU cleanup skipped on close due to 'Keep GPU Loaded'.")
-
         event.accept()
 
 
