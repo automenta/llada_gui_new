@@ -305,7 +305,8 @@ class LLaDAWorker(QThread):
             dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
             model = AutoModel.from_pretrained(
                 model_path, trust_remote_code=True, torch_dtype=dtype,
-                device_map="auto" if device == 'cuda' else None, cache_dir="data"
+                device_map="auto" if device == 'cuda' else None, cache_dir="data",
+                low_cpu_mem_usage=True # ADDED THIS LINE
             )
 
             # Resize embeddings for special tokens if needed
