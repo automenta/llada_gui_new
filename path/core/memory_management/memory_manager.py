@@ -449,4 +449,3 @@ class MemoryManager:
                 f"Consider enabling memory optimizations."
             )
         return None
-```
