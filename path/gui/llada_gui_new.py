@@ -35,6 +35,12 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.visualization_type = "Token Stream" # Default visualization type
         self.token_stream_data = [] # Placeholder for token stream data
         self.color_scheme = "Cool" # Default color scheme
+        self.animation_timer = QTimer(self) # Timer for animation
+        self.animation_timer.timeout.connect(self.update) # Trigger repaint on timer
+        self.animation_time = 0.0 # Time counter for animation
+        self.animation_speed = 0.01 # Animation speed factor
+        self.animation_timer.start(20) # 20ms interval for ~50fps animation
+
 
     def set_visualization_type(self, viz_type):
         """Set the current visualization type."""
@@ -68,6 +74,8 @@ class GLVisualizationWidget(QOpenGLWidget):
         glEnable(GL_BLEND) # Enable blending for smooth circles
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) # Standard alpha blending
 
+        self.animation_time += self.animation_speed # Increment animation time
+
         if self.visualization_type == "Token Stream":
             self.draw_token_stream()
         elif self.visualization_type == "Test Square":
@@ -88,20 +96,21 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def draw_token_stream(self):
         """Draw the Token Stream visualization."""
-        num_tokens = 20 # Example number of tokens to display
-        spacing = 0.1
+        num_tokens = 25 # Increased number of tokens for better stream
+        spacing = 0.07 # Reduced spacing for denser stream
         start_x = - (num_tokens - 1) * spacing / 2 # Center tokens
 
         for i in range(num_tokens):
             x = start_x + i * spacing
-            y = (i % 3) * 0.03 - 0.1 # Slight vertical wave
-            size = 0.04 + (i % 5) * 0.005 # Even smaller size variation
+            y_offset = np.sin(self.animation_time * 2.0 + i * 0.5) * 0.02 # Wavy motion
+            y = y_offset # Vertical wave motion
+            size = 0.03 + (i % 5) * 0.003 # Even smaller size variation, subtle
 
             # Get color based on scheme
             color = self.get_token_color(i, num_tokens)
-            glColor4f(color.redF(), color.greenF(), color.blueF(), 0.8) # Slightly transparent
+            glColor4f(color.redF(), color.greenF(), color.blueF(), 0.7) # Slightly more transparent
 
-            # Draw smooth circle using gluDisk
+            # Draw smooth circle using gluDisk - Enhanced visual
             glPushMatrix() # Prepare transformation matrix for each token
             glTranslatef(x, y, 0.0) # Translate to token position
             gluDisk(
@@ -120,17 +129,20 @@ class GLVisualizationWidget(QOpenGLWidget):
 
         if self.color_scheme == "Cool":
             # Cool scheme - blues and greens
-            return QColor.fromHslF(hue * 0.5 + 0.5, 0.9, 0.6) # Shift hue to cool range
+            return QColor.fromHslF(hue * 0.5 + 0.5, 0.8, 0.7) # Adjusted hue, saturation, lightness
         elif self.color_scheme == "Warm":
             # Warm scheme - reds and oranges
-            return QColor.fromHslF(hue * 0.3, 0.9, 0.6) # Shift hue to warm range
+            return QColor.fromHslF(hue * 0.1, 0.7, 0.7) # Adjusted hue, saturation, lightness
         elif self.color_scheme == "GrayScale":
             # Gray scale - simple gray based on index
-            gray_val = 1.0 - (index / total_tokens) * 0.8 # Lighter to darker gray
+            gray_val = 0.2 + (1.0 - (index / total_tokens) * 0.7) # Darker to lighter gray
             return QColor.fromRgbF(gray_val, gray_val, gray_val)
-        else:
-            # Default - rainbow/full spectrum
+        elif self.color_scheme == "Rainbow":
+            # Full spectrum rainbow
             return QColor.fromHslF(hue, 0.9, 0.6)
+        else:
+            # Default - Cool (as fallback)
+            return QColor.fromHslF(hue * 0.5 + 0.5, 0.8, 0.7)
 
 
     def resizeGL(self, width, height):
