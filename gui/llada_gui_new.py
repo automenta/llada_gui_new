@@ -23,11 +23,11 @@ from OpenGL.GL import *  # pylint: disable=W0614,W0611
 from OpenGL import GLU  # Import GLU for gluDisk
 import numpy as np
 
-
 # Import our modules with updated paths
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
 from core.llada_worker import LLaDAWorker
 from core.utils import format_error
+from gui.memory_monitor import MemoryMonitor # Import MemoryMonitor
 
 
 class GLVisualizationWidget(QOpenGLWidget):
@@ -360,6 +360,11 @@ class LLaDAGUINew(QMainWindow):
         self.setWindowTitle("LLaDA GUI - OpenGL Viz - Prototype")
         self.resize(1200, 900)  # Slightly larger initial size
 
+        # Memory Monitor setup
+        self.memory_monitor = MemoryMonitor()
+        self.memory_monitor.update.connect(self.update_memory_status_bar) # Connect monitor to status bar update
+        self.memory_monitor.start() # Start monitoring
+
         # Worker thread reference
         self.worker = None
 
@@ -396,6 +401,19 @@ class LLaDAGUINew(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")  # Initial status message
 
+        # Memory usage indicators in status bar
+        self.ram_indicator = QProgressBar()
+        self.ram_indicator.setTextVisible(False) # Hide percentage text
+        self.ram_indicator.setFixedWidth(100) # Fixed width for compact look
+        self.gpu_indicator = QProgressBar()
+        self.gpu_indicator.setTextVisible(False) # Hide percentage text
+        self.gpu_indicator.setFixedWidth(100) # Fixed width for compact look
+        self.status_bar.addPermanentWidget(QLabel("RAM:"))
+        self.status_bar.addPermanentWidget(self.ram_indicator)
+        self.status_bar.addPermanentWidget(QLabel("VRAM:"))
+        self.status_bar.addPermanentWidget(self.gpu_indicator)
+
+
         # Add Generate and Stop buttons to status bar
         self.generate_button_status_bar = QPushButton("Generate")
         self.generate_button_status_bar.clicked.connect(self.on_generate_clicked)
@@ -414,6 +432,12 @@ class LLaDAGUINew(QMainWindow):
 
         # Set the central widget
         self.setCentralWidget(main_widget)
+
+    def closeEvent(self, event):
+        """Handle closing event."""
+        self.memory_monitor.stop() # Stop memory monitor on close
+        event.accept()
+
 
     def add_sidebar_sections(self):
         """Adds placeholder sections to the sidebar."""
@@ -523,6 +547,15 @@ class LLaDAGUINew(QMainWindow):
         self.opengl_viz_widget.set_token_spacing(0.07) # Reset token spacing
         self.zoom_level_spin.setValue(1.0) # Reset zoom level spinbox
         self.opengl_viz_widget.set_zoom_level(1.0) # Reset zoom level in GL widget
+
+    @pyqtSlot(dict)
+    def update_memory_status_bar(self, memory_stats):
+        """Update memory status bar indicators."""
+        system_percent = memory_stats.get('system_percent', 0)
+        gpu_percent = memory_stats.get('gpu_percent', 0)
+
+        self.ram_indicator.setValue(int(system_percent))
+        self.gpu_indicator.setValue(int(gpu_percent))
 
 
 def main():
