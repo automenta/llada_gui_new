@@ -43,6 +43,7 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.animation_time = 0.0 # Time counter for animation
         self.animation_speed = 0.01 # Animation speed factor
         self.animation_timer.start(20) # 20ms interval for ~50fps animation
+        self.token_shape = "Circle" # Default token shape
 
 
     def set_visualization_type(self, viz_type):
@@ -60,6 +61,12 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.token_stream_data = data
         self.update()
 
+    def set_token_shape(self, shape):
+        """Set the shape of tokens in visualizations."""
+        self.token_shape = shape
+        self.update()
+
+
     def initializeGL(self):
         """Initialize OpenGL context and settings."""
         version_profile = QOpenGLVersionProfile()
@@ -74,7 +81,7 @@ class GLVisualizationWidget(QOpenGLWidget):
     def paintGL(self):
         """Paint the OpenGL scene."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glEnable(GL_BLEND) # Enable blending for smooth circles
+        glEnable(GL_BLEND) # Enable blending for smooth shapes
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) # Standard alpha blending
 
         self.animation_time += self.animation_speed # Increment animation time
@@ -113,16 +120,32 @@ class GLVisualizationWidget(QOpenGLWidget):
             color = self.get_token_color(i, num_tokens)
             glColor4f(color.redF(), color.greenF(), color.blueF(), 0.7) # Slightly more transparent
 
-            # Draw smooth circle using gluDisk - Enhanced visual
             glPushMatrix() # Prepare transformation matrix for each token
             glTranslatef(x, y, 0.0) # Translate to token position
-            gluDisk(
-                quad=gluNewQuadric(), # Create quadric object
-                innerRadius=0,
-                outerRadius=size,
-                slices=32, # Smooth circle
-                loops=32
-            )
+
+            # Draw shape based on selected token_shape
+            if self.token_shape == "Circle":
+                gluDisk(
+                    quad=gluNewQuadric(), # Create quadric object
+                    innerRadius=0,
+                    outerRadius=size,
+                    slices=32, # Smooth circle
+                    loops=32
+                )
+            elif self.token_shape == "Square":
+                glBegin(GL_QUADS)
+                glVertex2f(-size, -size)
+                glVertex2f(size, -size)
+                glVertex2f(size, size)
+                glVertex2f(-size, size)
+                glEnd()
+            elif self.token_shape == "Triangle":
+                glBegin(GL_TRIANGLES)
+                glVertex2f(0, size)
+                glVertex2f(-size, -size)
+                glVertex2f(size, -size)
+                glEnd()
+
             glPopMatrix() # Restore transformation
 
 
@@ -360,6 +383,14 @@ class LLaDAGUINew(QMainWindow):
         self.color_scheme_combo.currentTextChanged.connect(self.opengl_viz_widget.set_color_scheme)
         viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
         viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
+
+        # Token Shape Selection
+        self.token_shape_combo = QComboBox()
+        self.token_shape_combo.addItems(["Circle", "Square", "Triangle"])
+        self.token_shape_combo.setCurrentText("Circle") # Default shape
+        self.token_shape_combo.currentTextChanged.connect(self.opengl_viz_widget.set_token_shape)
+        viz_settings_layout.addWidget(QLabel("Token Shape:"), 2, 0)
+        viz_settings_layout.addWidget(self.token_shape_combo, 2, 1)
 
 
         viz_settings_group.setLayout(viz_settings_layout)
