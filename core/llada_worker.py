@@ -219,7 +219,7 @@ class LLaDAWorker(QThread):
             temperature = self.config.get('temperature', 0.0)
             cfg_scale = self.config.get('cfg_scale', 0.0)
             remasking = self.config.get('remasking', 'low_confidence')
-            fast_mode = self.config.get('fast_mode', False) # Still reading fast_mode for backward compatibility
+            fast_mode = self.config.get('fast_mode', True) # Still reading fast_mode for backward compatibility
             if fast_mode:
                 self.generation_mode = GenerationMode.FAST
             else:
@@ -282,8 +282,8 @@ class LLaDAWorker(QThread):
         if cache_key_to_unload:
             logger.info(f"Unloading cached model with key: {cache_key_to_unload} to free up memory.")
             model, tokenizer = LLaDAWorker._model_cache.pop(cache_key_to_unload) # Remove from cache
-            del model # Explicitly delete model
-            del tokenizer # Explicitly delete tokenizer
+            del model
+            del tokenizer
             cleanup_gpu_memory() # Clean up GPU memory
             logger.info("Cached model unloaded.")
         else:
@@ -294,7 +294,8 @@ class LLaDAWorker(QThread):
         """Loads the tokenizer and model, emitting progress signals and handling errors."""
         try:
             self.progress.emit(10, "Loading tokenizer...", {})
-            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=True, cache_dir="data")
+            dmap = "auto" if device == 'cuda' else None
+            tokenizer = AutoTokenizer.from_pretrained(model_path, device_map=dmap, trust_remote_code=True, use_fast=True, cache_dir="data")
             if hasattr(tokenizer, 'mask_token_id') and tokenizer.mask_token_id is not None:
                 self.mask_id = tokenizer.mask_token_id # Update mask_id from tokenizer if available
             if tokenizer.pad_token is None:
@@ -302,9 +303,11 @@ class LLaDAWorker(QThread):
 
             self.progress.emit(15, f"Loading model (device: {device})...", {})
             dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
+            #dtype = torch.float16
             model = AutoModel.from_pretrained(
-                model_path, trust_remote_code=True, torch_dtype=dtype,
-                device_map="auto" if device == 'cuda' else None, cache_dir="data",
+                model_path, trust_remote_code=True,
+                torch_dtype=dtype,
+                device_map=dmap, cache_dir="data",
                 low_cpu_mem_usage=True,
 
                 #**( {'attn_implementation': 'flash_attention_2', #not supported yet
@@ -320,7 +323,6 @@ class LLaDAWorker(QThread):
                 model.tie_weights()
             except AttributeError as e:
                 print(f"Warning: Could not tie weights: {e}")
-
 
             if device == 'cpu':
                 model = model.to('cpu')

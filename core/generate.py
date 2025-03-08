@@ -14,21 +14,22 @@ from typing import Optional, Callable, List
 
 import torch
 import torch.nn.functional as F
-from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like, empty, div, jit, \
-    int64, cat, where, Tensor, float32, gather, tensor, zeros, argmax, rand_like, device, linspace, \
+from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like, empty, div, \
+    int64, cat, where, Tensor, gather, tensor, zeros, argmax, rand_like, device, linspace, \
     full
 
 logger = logging.getLogger(__name__)
 
 
 def f32(x, device):
-    return tensor([x], dtype=float32, device=device)
+    return tensor([x], dtype=torch.float32, device=device)
 
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 CPU_DEVICE = device("cpu")
 MASK_TOKEN_ID_DEFAULT = 126336  # Default mask token ID
 CONFIDENCE_THRESHOLD_DEFAULT = 0.9  # Default confidence threshold
-EPSILON = f32(1e-10, DEVICE)  # Small value to avoid log(0)
+#EPSILON = f32(1e-10, DEVICE)  # Small value to avoid log(0)
+EPSILON = 1e-10
 
 
 class TokenBuffer:
@@ -73,8 +74,9 @@ class TokenBuffer:
         return TokenBuffer(self._data.clone(), self.device, self.cpu_offload)
 
 
-@jit.script
-def add_gumbel_noise(logits: Tensor, temperature: Tensor, epsilon) -> Tensor:
+#@jit.script
+#@torch.compile
+def add_gumbel_noise(logits: Tensor, temperature: float, epsilon: float) -> Tensor:
     """
     Add Gumbel noise for sampling categorical distributions.
 
@@ -85,9 +87,6 @@ def add_gumbel_noise(logits: Tensor, temperature: Tensor, epsilon) -> Tensor:
     Returns:
         Logits with Gumbel noise applied
     """
-    if temperature <= 0:
-        return logits
-
     noise = rand_like(logits)
 
     gumbel_noise = (-log(noise + epsilon)) ** temperature
@@ -244,7 +243,7 @@ def get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integrat
     logits = _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
     logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
 
-    if logits.dtype != torch.float32: logits = logits.to(torch.float32)
+    #if logits.dtype != torch.float32: logits = logits.to(torch.float32)
 
     return logits
 
@@ -252,21 +251,22 @@ def logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, 
     # Model processing and guidance
     logits = get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, x)
 
-    # Sample tokens
-    logits_with_noise = add_gumbel_noise(logits, temperature, EPSILON)
-    x0 = argmax(logits_with_noise, dim=-1)
+    if temperature>0:
+        logits = add_gumbel_noise(logits, temperature, EPSILON)
+
+    x0 = argmax(logits, dim=-1)
     # Compute confidence for remasking
     if remasking == 'low_confidence':
         x0_p = remaskConf(logits, temperature, x0)
     elif remasking == 'random':
-        x0_p = rand_like(x0, dtype=float32, device=x0.device)
+        x0_p = rand_like(x0, device=x0.device)
     else:
         raise NotImplementedError(f"Unsupported remasking strategy: {remasking}")
     return x0, x0_p
 
 
-@jit.script
-def remaskConf(logits, temperature, x0):
+#@torch.compile
+def remaskConf(logits:Tensor, temperature:float, x0:Tensor)->Tensor:
     p = F.softmax(logits / temperature if temperature > 0 else logits, dim=-1) # Apply temperature scaling to logits before softmax, or if temperature is <=0, use standard softmax
     return gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
@@ -334,7 +334,7 @@ def generate(
     """
     model.eval()
 
-    temperature = f32(temperature, device)
+    #temperature = f32(temperature, device)
 
     # Adjust gen_length to be divisible by block_length
     if gen_length % block_length != 0:
