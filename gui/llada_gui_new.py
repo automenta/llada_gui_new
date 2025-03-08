@@ -324,8 +324,21 @@ class LLaDAGUINew(QMainWindow):
 
         # Realtime Statistics 📊
         stats_group = QGroupBox("📊 Realtime Statistics")
-        stats_layout = QVBoxLayout()
-        stats_layout.addWidget(QLabel("Statistics Display Here"))  # Placeholder
+        stats_layout = QGridLayout()
+
+        # Token Rate Display
+        self.token_rate_label = QLabel("Token Rate: - tokens/s")
+        stats_layout.addWidget(self.token_rate_label, 0, 0)
+
+        # Step Time Display
+        self.step_time_label = QLabel("Step Time: - ms/step")
+        stats_layout.addWidget(self.step_time_label, 1, 0)
+
+        # Detailed Memory Usage Display (Placeholder - expandable later)
+        self.detailed_memory_label = QLabel("Memory Usage: - ")
+        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
+
+
         stats_group.setLayout(stats_layout)
         self.sidebar_layout.addWidget(stats_group)
 
@@ -392,6 +405,7 @@ class LLaDAGUINew(QMainWindow):
         self.worker.step_update.connect(self.update_visualization) # Connect step_update
         self.worker.finished.connect(self.generation_finished) # Connect finished signal
         self.worker.error.connect(self.generation_error) # Connect error signal
+        self.worker.realtime_stats.connect(self.update_realtime_stats) # Connect realtime stats signal
         self.worker.start() # Start the worker thread
 
     @pyqtSlot()
@@ -436,6 +450,13 @@ class LLaDAGUINew(QMainWindow):
         self.stop_button_status_bar.setEnabled(is_generating)
         self.prompt_input.setEnabled(not is_generating)
         # ... (Add other UI elements to disable as needed)
+
+    @pyqtSlot(dict)
+    def update_realtime_stats(self, stats):
+        """Update realtime statistics in the sidebar."""
+        self.token_rate_label.setText(f"Token Rate: {stats.get('token_rate', '-')}")
+        self.step_time_label.setText(f"Step Time: {stats.get('step_time', '-')} ms/step")
+        self.detailed_memory_label.setText(f"Memory Usage: {stats.get('memory_usage', '-')}")
 
 
 def main():

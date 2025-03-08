@@ -6,6 +6,7 @@ LLaDA Model Generation: worker thread
 
 import logging
 from typing import Optional, Callable, Dict, Any
+import time
 
 import torch
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer
@@ -28,6 +29,7 @@ class LLaDAWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
     memory_warning = pyqtSignal(str)
+    realtime_stats = pyqtSignal(dict) # Signal for realtime stats
 
     def __init__(self, prompt: str, config: Dict[str, Any], parent: Optional[Any] = None): # Type hints
         super().__init__(parent)
@@ -41,6 +43,8 @@ class LLaDAWorker(QThread):
         self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory)
         self.memory_cleanup_delay = config.get('memory_cleanup_delay', 300000) # Default 5 minutes in milliseconds
         self.generation_mode = GenerationMode.STANDARD # Default to STANDARD mode
+        self.last_step_time = None
+        self.step_times = []
 
 
     def stop(self):
@@ -77,6 +81,7 @@ class LLaDAWorker(QThread):
 
         # Visualization data extraction - Moved visualization logic to a separate method
         self._emit_step_update_signal(tokens)
+        self._emit_realtime_stats() # Emit realtime stats at each step
 
 
     def _emit_step_update_signal(self, tokens: torch.Tensor):
@@ -96,6 +101,37 @@ class LLaDAWorker(QThread):
             )
         except Exception as e:
             logger.error(f"Error in step update: {e}")
+
+    def _emit_realtime_stats(self):
+        """Calculate and emit realtime statistics."""
+        current_time = time.time()
+        step_time = 0
+        if self.last_step_time is not None:
+            step_time = (current_time - self.last_step_time) * 1000 # in milliseconds
+            self.step_times.append(step_time)
+            if len(self.step_times) > 10: # Keep last 10 step times for moving average
+                self.step_times.pop(0)
+        self.last_step_time = current_time
+        avg_step_time = sum(self.step_times) / len(self.step_times) if self.step_times else 0
+
+
+        tokens_per_sec = 0
+        if avg_step_time > 0:
+            tokens_per_sec = 1000 / avg_step_time # tokens per second, assuming 1 token per step
+
+        memory_usage_str = "-"
+        if torch.cuda.is_available():
+            memory_allocated = torch.cuda.memory_allocated(0) / (1024 ** 2) # MB
+            memory_reserved = torch.cuda.memory_reserved(0) / (1024 ** 2) # MB
+            memory_usage_str = f"{memory_allocated:.2f}MB allocated, {memory_reserved:.2f}MB reserved"
+
+
+        stats = {
+            "token_rate": f"{tokens_per_sec:.2f} tokens/s",
+            "step_time": f"{avg_step_time:.2f}",
+            "memory_usage": memory_usage_str
+        }
+        self.realtime_stats.emit(stats)
 
 
     def run(self):
@@ -156,6 +192,11 @@ class LLaDAWorker(QThread):
                     'adaptive_steps': adaptive_steps, 'chunk_size': chunk_size
                 }
             })
+
+            # Initialize step timing
+            self.last_step_time = time.time()
+            self.step_times = []
+
 
             # Generate text
             out = generate(
