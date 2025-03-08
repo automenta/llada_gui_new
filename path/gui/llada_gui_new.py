@@ -223,7 +223,17 @@ class LLaDAGUINew(QMainWindow):
         # Memory Integration 💾
         memory_group = QGroupBox("💾 Memory Integration")
         memory_layout = QVBoxLayout()
-        memory_layout.addWidget(QLabel("Memory Options Here"))  # Placeholder
+
+        # Enable Memory Integration Checkbox
+        self.enable_memory_checkbox = QCheckBox("Enable Memory Integration")
+        self.enable_memory_checkbox.toggled.connect(lambda checked: print(f"Memory Integration enabled: {checked}")) # Placeholder
+        memory_layout.addWidget(self.enable_memory_checkbox)
+
+        # Memory Server Status Label
+        self.memory_server_status_label = QLabel("Memory Server Status: Unknown") # Initial status
+        memory_layout.addWidget(self.memory_server_status_label)
+
+
         memory_group.setLayout(memory_layout)
         self.sidebar_layout.addWidget(memory_group)
 
