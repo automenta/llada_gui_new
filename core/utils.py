@@ -28,6 +28,11 @@ NO_GPU_TEXT = "No GPU Available"
 _cached_model_path = None  # Cache for model path
 _cached_device_properties = None # Cache for device properties
 
+DATA_DIR_NAME = "data"
+MEMORY_DIR_NAME = "memory"
+MODELS_DIR_NAME = "models"
+ONNX_MODELS_DIR_NAME = "onnx_models"
+
 
 def get_device_status():
     """
@@ -229,6 +234,7 @@ def create_data_directories():
     Directories created: 'data', 'data/memory', 'data/models',
     'data/models/onnx_models'.
     All directories are created relative to the repository root.
+    Uses constants for directory names.
 
     Returns:
         bool: True if directories were created or already exist,
@@ -237,10 +243,10 @@ def create_data_directories():
     logger.info("Verifying and creating data directories...")
     repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     directories = [
-        os.path.join(repo_dir, "data"),
-        os.path.join(repo_dir, "data", "memory"),
-        os.path.join(repo_dir, "data", "models"),
-        os.path.join(repo_dir, "data", "models", "onnx_models"),
+        os.path.join(repo_dir, DATA_DIR_NAME),
+        os.path.join(repo_dir, DATA_DIR_NAME, MEMORY_DIR_NAME),
+        os.path.join(repo_dir, DATA_DIR_NAME, MODELS_DIR_NAME),
+        os.path.join(repo_dir, DATA_DIR_NAME, MODELS_DIR_NAME, ONNX_MODELS_DIR_NAME),
     ]
 
     try:

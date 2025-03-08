@@ -155,21 +155,8 @@ def chunk_processing(model, tokens: torch.Tensor, chunk_size: int = 512) -> torc
     return torch.cat(all_logits, dim=1)
 
 
-def process_model(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
-    """
-    Process the sequence through the model with optional classifier-free guidance.
-
-    Args:
-        model: Language model
-        x: Current sequence tokens
-        cfg_scale: Classifier-free guidance scale
-        chunk_size: Size of chunks for processing
-        mask_id: Mask token ID
-        prompt_index: Boolean tensor indicating prompt positions
-
-    Returns:
-        Logits from the model
-    """
+def _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
+    """Helper function to get logits from the model, with optional CFG."""
     if cfg_scale > 0:
         un_x = x.clone()
         un_x[prompt_index] = mask_id
@@ -177,8 +164,8 @@ def process_model(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
         logits = chunk_processing(model, x_, chunk_size=chunk_size)
         logits, un_logits = torch.chunk(logits, 2, dim=0)
         logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
-
-    logits = chunk_processing(model, x, chunk_size=chunk_size)
+    else:
+        logits = chunk_processing(model, x, chunk_size=chunk_size)
     return logits
 
 
@@ -197,16 +184,29 @@ def apply_memory_guidance(logits, x, memory_integration, mask_index):
     """
     if memory_integration and memory_integration.is_initialized():
         token_probs = F.softmax(logits, dim=-1)
-        token_sequence = x[0].cpu().numpy().tolist()
+        token_sequence = x[0].tolist() # Keep as tensor if memory_integration can handle it
         for pos in range(x.size(1)):
             if mask_index[0, pos]:
-                pos_probs = token_probs[0, pos].cpu().numpy()
+                pos_probs = token_probs[0, pos] # Keep as tensor if memory_integration can handle it
                 guided_probs = memory_integration.apply_memory_guidance(
                     pos_probs, token_sequence, token_probs.size(-1)
                 )
-                token_probs[0, pos] = torch.tensor(guided_probs, device=token_probs.device, dtype=token_probs.dtype)
+                token_probs[0, pos] = guided_probs # Assuming memory_integration returns tensor
         logits = torch.log(token_probs + EPSILON)
     return logits
+
+
+def _select_tokens_to_transfer_block(confidence_block, mask_index_block, num_transfer_tokens_block, step):
+    """Helper function to select tokens to transfer within a block."""
+    transfer_index_block = torch.zeros_like(confidence_block, dtype=torch.bool, device=confidence_block.device)
+    masked_positions = mask_index_block.nonzero().squeeze(0) # Squeeze for single batch
+    num_masked = masked_positions.size(0)
+    tokens_to_transfer = num_transfer_tokens_block[step].item()
+    if tokens_to_transfer > 0 and num_masked > 0:
+        k = min(tokens_to_transfer, num_masked)
+        _, select_index = torch.topk(confidence_block[masked_positions], k=k)
+        transfer_index_block[masked_positions[select_index]] = True
+    return transfer_index_block
 
 
 def select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step):
@@ -233,6 +233,38 @@ def select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
             _, select_index = torch.topk(confidence[j, masked_positions], k=k)
             transfer_index[j, masked_positions[select_index]] = True
     return transfer_index
+
+
+def _process_generation_step(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
+                             memory_integration, temperature, remasking, step,
+                             num_transfer_tokens, block_start, block_end, mask_index):
+    """Helper function to process a single generation step within a block."""
+
+    # Model processing and guidance
+    logits = _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
+    logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
+
+    # Sample tokens
+    logits_with_noise = add_gumbel_noise(logits, temperature)
+    x0 = torch.argmax(logits_with_noise, dim=-1)
+
+    # Compute confidence for remasking
+    if remasking == 'low_confidence':
+        p = F.softmax(logits, dim=-1) if temperature > 0 else F.softmax(logits.to(torch.float64), dim=-1)
+        x0_p = torch.gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
+    elif remasking == 'random':
+        x0_p = torch.rand_like(x0, dtype=torch.float, device=x0.device)
+    else:
+        raise NotImplementedError(f"Unsupported remasking strategy: {remasking}")
+
+    # Restrict confidence to current block
+    confidence = torch.where(mask_index, x0_p, torch.tensor(-float('inf'), device=x.device))
+    confidence[:, :block_start] = -float('inf')
+    confidence[:, block_end:] = -float('inf')
+
+    # Select and transfer tokens
+    transfer_index = select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
+    return x0, transfer_index
 
 
 @torch.no_grad()
@@ -335,30 +367,14 @@ def generate(
             if not mask_index.any():
                 break
 
-            # Model processing and guidance
-            logits = process_model(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
-            logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
+            # Process generation step in helper function
+            x0, transfer_index = _process_generation_step(
+                model, x, cfg_scale, chunk_size, mask_id, prompt_index,
+                memory_integration, temperature, remasking, i,
+                num_transfer_tokens, block_start, block_end, mask_index
+            )
 
-            # Sample tokens
-            logits_with_noise = add_gumbel_noise(logits, temperature)
-            x0 = torch.argmax(logits_with_noise, dim=-1)
-
-            # Compute confidence for remasking
-            if remasking == 'low_confidence':
-                p = F.softmax(logits, dim=-1) if temperature > 0 else F.softmax(logits.to(torch.float64), dim=-1)
-                x0_p = torch.gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
-            elif remasking == 'random':
-                x0_p = torch.rand_like(x0, dtype=torch.float, device=x0.device)
-            else:
-                raise NotImplementedError(f"Unsupported remasking strategy: {remasking}")
-
-            # Restrict confidence to current block
-            confidence = torch.where(mask_index, x0_p, torch.tensor(-float('inf'), device=x.device))
-            confidence[:, :block_start] = -float('inf')
-            confidence[:, block_end:] = -float('inf')
-
-            # Select and transfer tokens
-            transfer_index = select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, i)
+            # Update token buffer and mask
             x[transfer_index] = x0[transfer_index]
             mask_index[transfer_index] = False
             token_buffer.update(x)

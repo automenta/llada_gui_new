@@ -13,6 +13,7 @@ from transformers import AutoTokenizer, AutoModel
 
 from core.utils import cleanup_gpu_memory, get_model_path, format_error
 from core.generate import generate  # Import from our optimized generate.py
+from core.generation_mode import GenerationMode # Import GenerationMode Enum
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ class LLaDAWorker(QThread):
         self.cleanup_timer = QTimer(self)
         self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory)
         self.memory_cleanup_delay = config.get('memory_cleanup_delay', 300000) # Default 5 minutes in milliseconds
+        self.generation_mode = GenerationMode.STANDARD # Default to STANDARD mode
+
 
     def stop(self):
         """Stop the generation process."""
@@ -132,18 +135,24 @@ class LLaDAWorker(QThread):
             temperature = self.config.get('temperature', 0.0)
             cfg_scale = self.config.get('cfg_scale', 0.0)
             remasking = self.config.get('remasking', 'low_confidence')
-            fast_mode = self.config.get('fast_mode', False)
-            cpu_offload = device == 'cuda' and not fast_mode
-            adaptive_steps = True
-            chunk_size = 256 if fast_mode else 512
-            confidence_threshold = 0.8 if fast_mode else 0.9
+            fast_mode = self.config.get('fast_mode', False) # Still reading fast_mode for backward compatibility
+            if fast_mode:
+                self.generation_mode = GenerationMode.FAST
+            else:
+                self.generation_mode = GenerationMode.STANDARD
 
-            self.progress.emit(40, f"Starting generation (steps: {steps}, length: {gen_length})...", {
+            cpu_offload = device == 'cuda' and self.generation_mode == GenerationMode.STANDARD # CPU offload only in STANDARD mode
+            adaptive_steps = True
+            chunk_size = 256 if self.generation_mode == GenerationMode.FAST else 512
+            confidence_threshold = 0.8 if self.generation_mode == GenerationMode.FAST else 0.9
+
+
+            self.progress.emit(40, f"Starting generation in {self.generation_mode.value} mode (steps: {steps}, length: {gen_length})...", {
                 'prompt_length': input_ids.shape[1],
                 'params': { # Params dict is cleaner
                     'gen_length': gen_length, 'steps': steps, 'block_length': block_length,
                     'temperature': temperature, 'cfg_scale': cfg_scale, 'remasking': remasking,
-                    'device': device, 'cpu_offload': cpu_offload, 'fast_mode': fast_mode,
+                    'device': device, 'cpu_offload': cpu_offload, 'generation_mode': self.generation_mode.value,
                     'adaptive_steps': adaptive_steps, 'chunk_size': chunk_size
                 }
             })
