@@ -15,9 +15,12 @@ import gc
 import logging
 import threading
 import time
+from typing import Optional, List, Callable, Dict, Union
 
 import psutil
 import torch
+import numpy as np
+from torch import nn, Tensor
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -51,10 +54,10 @@ class MemoryManager:
         """Initialize the memory manager."""
         self.lock = threading.RLock()
         self.monitoring_thread = None
-        self.stop_monitoring = threading.Event()
-        self.memory_listeners = []
-        self.last_memory_stats = {}
-        self.history = []
+        self.stop_monitoring_event = threading.Event()
+        self.memory_listeners: List[Callable] = []
+        self.last_memory_stats: Dict = {}
+        self.history: List[tuple[float, Dict]] = []
         self.history_max_len = 100  # Keep last 100 snapshots
         self.monitoring_interval = 1.0  # 1 second by default
 
@@ -99,7 +102,7 @@ class MemoryManager:
         """Start the memory monitoring thread if it's not already running."""
         with self.lock:
             if self.monitoring_thread is None or not self.monitoring_thread.is_alive():
-                self.stop_monitoring.clear()
+                self.stop_monitoring_event.clear()
                 self.monitoring_thread = threading.Thread(
                     target=self._monitoring_loop,
                     daemon=True
@@ -110,14 +113,14 @@ class MemoryManager:
     def stop_monitoring(self):
         """Stop the memory monitoring thread."""
         with self.lock:
-            self.stop_monitoring.set()
+            self.stop_monitoring_event.set()
             if self.monitoring_thread and self.monitoring_thread.is_alive():
                 self.monitoring_thread.join(2)  # Wait up to 2 seconds
                 logger.info("Memory monitoring stopped")
 
     def _monitoring_loop(self):
         """Background thread for continuous memory monitoring."""
-        while not self.stop_monitoring.is_set():
+        while not self.stop_monitoring_event.is_set():
             try:
                 stats = self.get_memory_stats()
                 self._update_history(stats)
@@ -130,13 +133,13 @@ class MemoryManager:
 
             time.sleep(self.monitoring_interval)
 
-    def _update_history(self, stats):
+    def _update_history(self, stats: Dict):
         """Add current memory stats to history and maintain history size."""
         self.history.append((time.time(), stats))
         if len(self.history) > self.history_max_len:
             self.history.pop(0)  # Remove oldest entry
 
-    def _check_thresholds(self, stats):
+    def _check_thresholds(self, stats: Dict):
         """Check memory usage against warning and critical thresholds."""
         if stats.get('gpu_available', False):
             gpu_percent = stats['gpu_percent']
@@ -151,7 +154,7 @@ class MemoryManager:
             logger.warning(f"CRITICAL: System memory usage at {system_percent:.1f}%")
             gc.collect()  # System GC on critical system memory
 
-    def _notify_listeners(self, stats):
+    def _notify_listeners(self, stats: Dict):
         """Notify all registered listeners with current memory statistics."""
         for listener in self.memory_listeners:
             try:
@@ -159,7 +162,7 @@ class MemoryManager:
             except Exception as e:
                 logger.error(f"Error notifying memory listener: {e}")
 
-    def add_listener(self, listener_func):
+    def add_listener(self, listener_func: Callable):
         """Register a listener function to receive memory statistics updates."""
         if listener_func not in self.memory_listeners:
             self.memory_listeners.append(listener_func)
@@ -169,12 +172,12 @@ class MemoryManager:
                 except Exception as e:
                     logger.error(f"Error notifying new memory listener: {e}")
 
-    def remove_listener(self, listener_func):
+    def remove_listener(self, listener_func: Callable):
         """Unregister a listener function."""
         if listener_func in self.memory_listeners:
             self.memory_listeners.remove(listener_func)
 
-    def get_memory_stats(self):
+    def get_memory_stats(self) -> Dict:
         """
         Get current memory statistics for system and GPU.
 
@@ -236,7 +239,7 @@ class MemoryManager:
             except Exception as e:
                 logger.error(f"Error cleaning GPU memory: {e}")
 
-    def optimize_parameters(self, current_params, available_memory_gb=None):
+    def optimize_parameters(self, current_params: Dict, available_memory_gb: Optional[float] = None) -> Dict:
         """
         Dynamically optimize generation parameters based on available GPU memory.
 
@@ -255,45 +258,45 @@ class MemoryManager:
             available_memory_gb = stats.get('gpu_free', 0) if stats.get('gpu_available', False) else 0
 
         logger.info(f"Optimizing parameters for {available_memory_gb:.2f}GB available memory")
-        optimized = dict(current_params)  # Create a copy to avoid modifying original
+        optimized_params = dict(current_params)  # Create a copy to avoid modifying original
 
         if available_memory_gb < 2:  # Extreme memory constraint
             logger.warning("Critically low GPU memory, applying aggressive optimizations")
-            self._adjust_parameter(optimized, 'gen_length', decrease_factor=0.75)
-            self._adjust_parameter(optimized, 'steps', decrease_factor=0.75)
-            self._adjust_parameter(optimized, 'block_length', decrease_factor=0.5)
-            optimized['use_4bit'] = True
-            optimized['extreme_mode'] = True
+            self._adjust_parameter(optimized_params, 'gen_length', decrease_factor=0.75)
+            self._adjust_parameter(optimized_params, 'steps', decrease_factor=0.75)
+            self._adjust_parameter(optimized_params, 'block_length', decrease_factor=0.5)
+            optimized_params['use_4bit'] = True
+            optimized_params['extreme_mode'] = True
 
         elif available_memory_gb < 4:  # Very limited memory
             logger.warning("Very limited GPU memory, applying strong optimizations")
-            self._adjust_parameter(optimized, 'gen_length', decrease_factor=0.5)
-            self._adjust_parameter(optimized, 'steps', decrease_factor=0.5)
-            optimized['use_4bit'] = True
-            optimized['extreme_mode'] = True
+            self._adjust_parameter(optimized_params, 'gen_length', decrease_factor=0.5)
+            self._adjust_parameter(optimized_params, 'steps', decrease_factor=0.5)
+            optimized_params['use_4bit'] = True
+            optimized_params['extreme_mode'] = True
 
         elif available_memory_gb < 6:  # Limited memory
             logger.info("Limited GPU memory, applying moderate optimizations")
-            self._adjust_parameter(optimized, 'gen_length', decrease_factor=0.25)
-            self._adjust_parameter(optimized, 'steps', decrease_factor=0.25)
-            optimized['use_8bit'] = True
+            self._adjust_parameter(optimized_params, 'gen_length', decrease_factor=0.25)
+            self._adjust_parameter(optimized_params, 'steps', decrease_factor=0.25)
+            optimized_params['use_8bit'] = True
 
         elif available_memory_gb < 8:  # Somewhat limited memory
             logger.info("Somewhat limited GPU memory, applying light optimizations")
-            if optimized.get('gen_length', 64) > 256 or optimized.get('steps', 64) > 256:
-                self._adjust_parameter(optimized, 'gen_length', decrease_factor=0.1)
-                self._adjust_parameter(optimized, 'steps', decrease_factor=0.1)
-                optimized['use_8bit'] = True
+            if optimized_params.get('gen_length', 64) > 256 or optimized_params.get('steps', 64) > 256:
+                self._adjust_parameter(optimized_params, 'gen_length', decrease_factor=0.1)
+                self._adjust_parameter(optimized_params, 'steps', decrease_factor=0.1)
+                optimized_params['use_8bit'] = True
 
         elif available_memory_gb < 11:  # Approaching 12GB limit
             logger.info("Good GPU memory available (approaching limits for extreme settings)")
-            if optimized.get('gen_length', 64) > 384 and optimized.get('steps', 64) > 384:
-                self._adjust_parameter(optimized, 'gen_length', decrease_factor=0.05)
-                self._adjust_parameter(optimized, 'steps', decrease_factor=0.05)
+            if optimized_params.get('gen_length', 64) > 384 and optimized_params.get('steps', 64) > 384:
+                self._adjust_parameter(optimized_params, 'gen_length', decrease_factor=0.05)
+                self._adjust_parameter(optimized_params, 'steps', decrease_factor=0.05)
 
-        return optimized
+        return optimized_params
 
-    def _adjust_parameter(self, params, param_name, decrease_factor=None, target_value=None):
+    def _adjust_parameter(self, params: Dict, param_name: str, decrease_factor: Optional[float] = None, target_value: Optional[int] = None) -> bool:
         """Adjust a single parameter within its defined constraints."""
         if param_name not in params or param_name not in self.default_parameters:
             return False
@@ -319,7 +322,7 @@ class MemoryManager:
             return True
         return False
 
-    def estimate_memory_requirement(self, params):
+    def estimate_memory_requirement(self, params: Dict) -> float:
         """Estimate memory required based on generation parameters."""
         base_memory_gb = 3.5  # Base memory for LLaDA-8B model (empirical value)
 
@@ -342,7 +345,7 @@ class MemoryManager:
         logger.info(f"Estimated memory requirement: {memory_gb:.2f}GB for generation parameters")
         return memory_gb
 
-    def can_fit_in_memory(self, params):
+    def can_fit_in_memory(self, params: Dict) -> bool:
         """Check if generation parameters can fit within available GPU memory."""
         stats = self.get_memory_stats()
         if not stats.get('gpu_available', False):
@@ -359,7 +362,7 @@ class MemoryManager:
             )
         return can_fit
 
-    def get_memory_usage_history(self, duration_seconds=None):
+    def get_memory_usage_history(self, duration_seconds: Optional[float] = None) -> Dict:
         """Get historical memory usage data."""
         with self.lock:
             if not self.history:
@@ -374,14 +377,14 @@ class MemoryManager:
                 'gpu_percent': gpu_percent
             }
 
-    def _filter_history_by_duration(self, duration_seconds):
+    def _filter_history_by_duration(self, duration_seconds: Optional[float]) -> List[tuple[float, Dict]]:
         """Filter memory history by a given duration."""
         if duration_seconds is None:
             return self.history
         cutoff_time = time.time() - duration_seconds
         return [(t, s) for t, s in self.history if t >= cutoff_time]
 
-    def _extract_history_data(self, history):
+    def _extract_history_data(self, history: List[tuple[float, Dict]]) -> tuple[List[float], List[float], List[float]]:
         """Extract timestamps and memory percentages from history data."""
         timestamps = [t for t, _ in history]
         system_percent = [s.get('system_percent', 0) for _, s in history]
@@ -391,7 +394,7 @@ class MemoryManager:
             gpu_percent.extend([0] * (len(timestamps) - len(gpu_percent)))
         return timestamps, system_percent, gpu_percent
 
-    def suggest_optimal_parameters(self, task_requirement=None):
+    def suggest_optimal_parameters(self, task_requirement: Optional[int] = None) -> Dict:
         """Suggest optimal parameters based on memory and task requirements."""
         stats = self.get_memory_stats()
         params = {param: config['default'] for param, config in self.default_parameters.items()}
@@ -421,7 +424,7 @@ class MemoryManager:
 
         return params
 
-    def get_memory_warning(self, params):
+    def get_memory_warning(self, params: Dict) -> Optional[str]:
         """Get a warning message if memory usage is likely to be problematic."""
         if not torch.cuda.is_available() or params.get('device', 'cuda') != 'cuda':
             return None  # No warning for CPU mode
@@ -446,3 +449,4 @@ class MemoryManager:
                 f"Consider enabling memory optimizations."
             )
         return None
+```
