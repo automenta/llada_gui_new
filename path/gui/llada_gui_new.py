@@ -280,7 +280,7 @@ class GLVisualizationWidget(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
-            if image_ # Fix: Check if image_data is not None
+            if image_
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
             self.text_textures[text] = texture_id
             self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
@@ -624,7 +624,7 @@ class LLaDAGUINew(QMainWindow):
         self.keep_gpu_loaded = (state == Qt.CheckState.Checked)
         print(f"Keep GPU Loaded Checkbox changed: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
         if self.keep_gpu_loaded:
-            self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup if keeping GPU loaded
+            self.cancel_gpu_cleanup_timer() # Immediately cancel any pending cleanup if keeping GPU loaded
 
     def get_generation_config(self):
         """Collects generation parameters from UI elements."""
@@ -659,7 +659,7 @@ class LLaDAGUINew(QMainWindow):
     def _delayed_cleanup_gpu_memory(self): # Changed to _delayed_cleanup_gpu_memory
         """Initiates GPU memory cleanup via worker signal."""
         print("_delayed_cleanup_gpu_memory() timer event. self.keep_gpu_loaded:", self.keep_gpu_loaded) # DEBUG
-        if self.keep_gpu_loaded: # Do not cleanup if user wants to keep GPU loaded - double check here as well
+        if self.keep_gpu_loaded: # Double check here as well - Do not cleanup if user wants to keep GPU loaded
             print("GPU cleanup skipped due to 'Keep GPU Loaded' setting on timer event.") # DEBUG
             return
         self.status_bar.showMessage("Initiating GPU memory cleanup...")
@@ -682,7 +682,9 @@ class LLaDAGUINew(QMainWindow):
 
         config = self.get_generation_config()
         self.set_ui_generating(True)
-        self.cancel_gpu_cleanup_timer() # Cancel any pending cleanup on new generate request
+        # Cancel any pending cleanup on new generate request, regardless of keep_gpu_loaded
+        # Starting a new generation should always cancel a pending cleanup.
+        self.cancel_gpu_cleanup_timer()
         print(f"on_generate_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
         self.worker = LLaDAWorker(prompt_text, config) # Create new worker for each generate click
         self.worker.progress.connect(self.update_progress)
@@ -700,9 +702,10 @@ class LLaDAGUINew(QMainWindow):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.set_ui_generating(False)
-            print(f"on_stop_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
-            if not self.keep_gpu_loaded:
-                self.start_gpu_cleanup_timer() # Schedule cleanup on stop if not keeping loaded
+            print(f"on_stop_clicked: self.keep_gpu_loaded = {self.keep_gpu_loaded}")
+            if not self.keep_gpu_loaded: # Only start timer if NOT keeping GPU loaded
+                self.start_gpu_cleanup_timer() # Schedule cleanup on stop if NOT keeping loaded
+            else: print("GPU cleanup timer NOT started due to 'Keep GPU Loaded'.")
 
     @pyqtSlot(int, str, dict)
     def update_progress(self, progress_percent, message, data):
@@ -726,9 +729,10 @@ class LLaDAGUINew(QMainWindow):
         print(f"Generated Output: {output_text}")
         self.prompt_input.setPlainText(output_text)
         self.set_ui_generating(False)
-        print(f"generation_finished: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
-        if not self.keep_gpu_loaded:
-            self.start_gpu_cleanup_timer() # Schedule cleanup after generation if not keeping loaded
+        print(f"generation_finished: self.keep_gpu_loaded = {self.keep_gpu_loaded}")
+        if not self.keep_gpu_loaded: # Only start timer if NOT keeping GPU loaded
+            self.start_gpu_cleanup_timer() # Schedule cleanup after generation if NOT keeping loaded
+        else: print("GPU cleanup timer NOT started due to 'Keep GPU Loaded'.")
 
     @pyqtSlot(str)
     def generation_error(self, error_message):
@@ -736,9 +740,10 @@ class LLaDAGUINew(QMainWindow):
         self.status_bar.showMessage(f"Generation Error: {error_message}")
         QMessageBox.critical(self, "Generation Error", f"Error: {error_message}")
         self.set_ui_generating(False)
-        print(f"generation_error: self.keep_gpu_loaded = {self.keep_gpu_loaded}") # DEBUG
-        if not self.keep_gpu_loaded: # Still schedule cleanup even on error, to free resources
+        print(f"generation_error: self.keep_gpu_loaded = {self.keep_gpu_loaded}")
+        if not self.keep_gpu_loaded: # Still schedule cleanup even on error if NOT keeping loaded
              self.start_gpu_cleanup_timer()
+        else: print("GPU cleanup timer NOT started due to 'Keep GPU Loaded' (error case).")
 
     def set_ui_generating(self, is_generating):
         """Enables/disables UI elements based on generation status."""
@@ -786,7 +791,9 @@ class LLaDAGUINew(QMainWindow):
         self.token_data_mode_combo.setCurrentText("Decoded Tokens")
         self.colormap_combo.setCurrentText("Cool")
         self.show_prob_bar_checkbox.setChecked(True)
-        self.cancel_gpu_cleanup_timer() # Cancel cleanup on clear
+        # Cancel cleanup on clear, regardless of keep_gpu_loaded. Clearing implies a fresh start.
+        self.cancel_gpu_cleanup_timer()
+        print("GPU cleanup timer cancelled on 'Clear'.")
 
     @pyqtSlot(dict)
     def update_memory_status_bar(self, memory_stats):
@@ -866,8 +873,11 @@ class LLaDAGUINew(QMainWindow):
         self.save_settings()
         self.memory_monitor.stop()
         self.cancel_gpu_cleanup_timer()
-        if not self.keep_gpu_loaded:
+        if not self.keep_gpu_loaded: # Only cleanup on close if NOT keeping loaded
             self._delayed_cleanup_gpu_memory() # Call delayed cleanup on close as well, to be safe
+        else:
+            print("GPU cleanup skipped on close due to 'Keep GPU Loaded'.")
+
         event.accept()
 
 
