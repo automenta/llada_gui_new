@@ -34,6 +34,8 @@ class LLaDAWorker(QThread):
     memory_influence_update = pyqtSignal(np.ndarray) # Signal for memory influence data
     cleanup_memory_signal = pyqtSignal() # Add this signal
 
+    _model_cache = {} # Class-level model cache
+
     def __init__(self, prompt: str, config: Dict[str, Any], parent: Optional[Any] = None): # Type hints
         super().__init__(parent)
         self.prompt = prompt
@@ -176,19 +178,28 @@ class LLaDAWorker(QThread):
             device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
             self.progress.emit(5, f"Starting with device: {device}", {})
 
-            # if device == 'cuda':
-            #     cleanup_gpu_memory()
-            #     free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
-            #     if free_memory < MEMORY_WARNING_THRESHOLD_GB:
-            #         self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
-
             model_path = get_model_path()
+            precision_key = "normal"
+            if self.config.get('use_8bit'):
+                precision_key = "8bit"
+            elif self.config.get('use_4bit'):
+                precision_key = "4bit"
+            cache_key = (model_path, precision_key, device)
 
-            # Load tokenizer and model - Encapsulated loading into a separate method
-            tokenizer, model = self._load_model_and_tokenizer(model_path, device)
-            if model is None or tokenizer is None: # Handle loading failure
-                return # _load_model_and_tokenizer already emitted error
-            self.tokenizer = tokenizer # Store tokenizer instance in worker
+            # Check if model is in cache
+            if cache_key in LLaDAWorker._model_cache:
+                self.progress.emit(15, "Using cached model...", {})
+                model, tokenizer = LLaDAWorker._model_cache[cache_key]
+                self.tokenizer = tokenizer # Store tokenizer instance in worker
+            else:
+                # Load tokenizer and model - Encapsulated loading into a separate method
+                tokenizer, model = self._load_model_and_tokenizer(model_path, device)
+                if model is None or tokenizer is None: # Handle loading failure
+                    return # _load_model_and_tokenizer already emitted error
+                self.tokenizer = tokenizer # Store tokenizer instance in worker
+                # Store model in cache
+                LLaDAWorker._model_cache[cache_key] = (model, tokenizer)
+
 
             # Prepare input - Input preparation into a separate method
             input_ids = self._prepare_input(tokenizer, device)
