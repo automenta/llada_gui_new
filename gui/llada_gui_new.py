@@ -383,7 +383,7 @@ class LLaDAGUINew(QMainWindow):
             'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
             'extreme_mode': self.extreme_mode_checkbox.isChecked(),
             'fast_mode': self.fast_mode_checkbox.isChecked(),
-            'use_memory': self.enable_memory_checkbox.isChecked()
+            'use_memory': self.enable_memory_checkbox.isChecked() # This checkbox does not exist in this GUI - might be from old GUI
         }
 
     @pyqtSlot()
@@ -405,7 +405,7 @@ class LLaDAGUINew(QMainWindow):
         self.worker.step_update.connect(self.update_visualization) # Connect step_update
         self.worker.finished.connect(self.generation_finished) # Connect finished signal
         self.worker.error.connect(self.generation_error) # Connect error signal
-        self.worker.realtime_stats.connect(self.update_realtime_stats) # Connect realtime stats signal
+        self.worker.realtime_stats.connect(self.update_realtime_stats_display) # Connect realtime stats signal
         self.worker.start() # Start the worker thread
 
     @pyqtSlot()
@@ -452,7 +452,7 @@ class LLaDAGUINew(QMainWindow):
         # ... (Add other UI elements to disable as needed)
 
     @pyqtSlot(dict)
-    def update_realtime_stats(self, stats):
+    def update_realtime_stats_display(self, stats):
         """Update realtime statistics in the sidebar."""
         self.token_rate_label.setText(f"Token Rate: {stats.get('token_rate', '-')}")
         self.step_time_label.setText(f"Step Time: {stats.get('step_time', '-')} ms/step")
