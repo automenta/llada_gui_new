@@ -283,8 +283,6 @@ class LLaDAGUINew(QMainWindow):
         self.device_group = QButtonGroup()
         self.device_group.addButton(self.cpu_radio)
         self.device_group.addButton(self.gpu_radio)
-        self.cpu_radio.toggled.connect(lambda checked: print(f"Device CPU selected: {checked}))")) # Placeholder
-        self.gpu_radio.toggled.connect(lambda checked: print(f"Device GPU selected: {checked}))")) # Placeholder
         device_layout.addWidget(self.cpu_radio)
         device_layout.addWidget(self.gpu_radio)
         model_layout.addWidget(QLabel("Device:"), 0, 0)
@@ -299,9 +297,6 @@ class LLaDAGUINew(QMainWindow):
         self.precision_group.addButton(self.normal_precision_radio)
         self.precision_group.addButton(self.quant_8bit_radio)
         self.precision_group.addButton(self.quant_4bit_radio)
-        self.normal_precision_radio.toggled.connect(lambda checked: print(f"Precision Normal selected: {checked}))")) # Placeholder
-        self.quant_8bit_radio.toggled.connect(lambda checked: print(f"Precision 8-bit selected: {checked}))")) # Placeholder
-        self.quant_4bit_radio.toggled.connect(lambda checked: print(f"Precision 4-bit selected: {checked}))")) # Placeholder
         precision_layout.addWidget(self.normal_precision_radio)
         precision_layout.addWidget(self.quant_8bit_radio)
         precision_layout.addWidget(self.quant_4bit_radio)
@@ -310,12 +305,10 @@ class LLaDAGUINew(QMainWindow):
 
         # Extreme Mode Checkbox
         self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
-        self.extreme_mode_checkbox.toggled.connect(lambda checked: print(f"Extreme Mode selected: {checked}))")) # Placeholder
         model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
 
         # Fast Mode Checkbox
         self.fast_mode_checkbox = QCheckBox("Fast Mode")
-        self.fast_mode_checkbox.toggled.connect(lambda checked: print(f"Fast Mode selected: {checked}))")) # Placeholder
         model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
 
 
@@ -325,37 +318,14 @@ class LLaDAGUINew(QMainWindow):
         # Memory Integration 💾
         memory_group = QGroupBox("💾 Memory Integration")
         memory_layout = QVBoxLayout()
-
-        # Enable Memory Integration Checkbox
-        self.enable_memory_checkbox = QCheckBox("Enable Memory Integration")
-        self.enable_memory_checkbox.toggled.connect(lambda checked: print(f"Memory Integration enabled: {checked}")) # Placeholder
-        memory_layout.addWidget(self.enable_memory_checkbox)
-
-        # Memory Server Status Label
-        self.memory_server_status_label = QLabel("Memory Server Status: Unknown") # Initial status
-        memory_layout.addWidget(self.memory_server_status_label)
-
-
+        memory_layout.addWidget(QLabel("Memory Options Here"))  # Placeholder
         memory_group.setLayout(memory_layout)
         self.sidebar_layout.addWidget(memory_group)
 
         # Realtime Statistics 📊
         stats_group = QGroupBox("📊 Realtime Statistics")
-        stats_layout = QGridLayout()
-
-        # Token Rate Display
-        self.token_rate_label = QLabel("Token Rate: - tokens/s")
-        stats_layout.addWidget(self.token_rate_label, 0, 0)
-
-        # Step Time Display
-        self.step_time_label = QLabel("Step Time: - ms/step")
-        stats_layout.addWidget(self.step_time_label, 1, 0)
-
-        # Detailed Memory Usage Display (Placeholder - expandable later)
-        self.detailed_memory_label = QLabel("Memory Usage: - ")
-        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
-
-
+        stats_layout = QVBoxLayout()
+        stats_layout.addWidget(QLabel("Statistics Display Here"))  # Placeholder
         stats_group.setLayout(stats_layout)
         self.sidebar_layout.addWidget(stats_group)
 
@@ -399,6 +369,7 @@ class LLaDAGUINew(QMainWindow):
             'use_8bit': self.use_8bit.isChecked() and device == 'cuda',
             'use_4bit': self.use_4bit.isChecked() and device == 'cuda',
             'extreme_mode': self.extreme_mode_checkbox.isChecked(),
+            'fast_mode': self.fast_mode_checkbox.isChecked(),
             'use_memory': self.enable_memory_checkbox.isChecked()
         }
 
