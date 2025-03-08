@@ -181,6 +181,8 @@ class LLaDAGUINew(QMainWindow):
         self.device_group = QButtonGroup()
         self.device_group.addButton(self.cpu_radio)
         self.device_group.addButton(self.gpu_radio)
+        self.cpu_radio.toggled.connect(lambda checked: print(f"Device CPU selected: {checked}))")) # Placeholder
+        self.gpu_radio.toggled.connect(lambda checked: print(f"Device GPU selected: {checked}))")) # Placeholder
         device_layout.addWidget(self.cpu_radio)
         device_layout.addWidget(self.gpu_radio)
         model_layout.addWidget(QLabel("Device:"), 0, 0)
@@ -195,6 +197,9 @@ class LLaDAGUINew(QMainWindow):
         self.precision_group.addButton(self.normal_precision_radio)
         self.precision_group.addButton(self.quant_8bit_radio)
         self.precision_group.addButton(self.quant_4bit_radio)
+        self.normal_precision_radio.toggled.connect(lambda checked: print(f"Precision Normal selected: {checked}))")) # Placeholder
+        self.quant_8bit_radio.toggled.connect(lambda checked: print(f"Precision 8-bit selected: {checked}))")) # Placeholder
+        self.quant_4bit_radio.toggled.connect(lambda checked: print(f"Precision 4-bit selected: {checked}))")) # Placeholder
         precision_layout.addWidget(self.normal_precision_radio)
         precision_layout.addWidget(self.quant_8bit_radio)
         precision_layout.addWidget(self.quant_4bit_radio)
@@ -203,10 +208,12 @@ class LLaDAGUINew(QMainWindow):
 
         # Extreme Mode Checkbox
         self.extreme_mode_checkbox = QCheckBox("Extreme Mode")
+        self.extreme_mode_checkbox.toggled.connect(lambda checked: print(f"Extreme Mode selected: {checked}))")) # Placeholder
         model_layout.addWidget(self.extreme_mode_checkbox, 2, 1)
 
         # Fast Mode Checkbox
         self.fast_mode_checkbox = QCheckBox("Fast Mode")
+        self.fast_mode_checkbox.toggled.connect(lambda checked: print(f"Fast Mode selected: {checked}))")) # Placeholder
         model_layout.addWidget(self.fast_mode_checkbox, 3, 1)
 
 
