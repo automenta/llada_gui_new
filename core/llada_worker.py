@@ -216,20 +216,3 @@ class LLaDAWorker(QThread):
             logger.error(error_msg)
             self.error.emit(error_msg)
             return None # Indicate input preparation failure
-```
-```
-core/llada_worker.py
-- Added type hints for function arguments, return values, and class attributes for improved code clarity and maintainability.
-- Added docstrings to methods for better documentation.
-- Prevented redundant progress updates by adding a check `if step == self.current_step: return` in `update_progress`.
-- Separated visualization data extraction logic into a new private method `_emit_step_update_signal` to improve code organization and readability.
-- Moved model and tokenizer initialization outside the `try` block in `run` to ensure they are accessible in the `finally` block for cleanup, even if loading fails.
-- Encapsulated model and tokenizer loading logic into a new private method `_load_model_and_tokenizer` to improve code modularity and error handling. This method now also handles error emission and returns `None` in case of failure.
-- Encapsulated input preparation logic into a new private method `_prepare_input` for better code organization and error handling. This method also handles error emission and returns `None` in case of failure.
-- Improved error handling by checking for `None` return values from `_load_model_and_tokenizer` and `_prepare_input` in the `run` method and returning early if loading or input preparation fails.
-- Moved parameter extraction from `self.config` to be closer to where they are used, improving readability.
-- Simplified the parameters dictionary creation in `run` for better readability.
-- Added a `finally` block to `run` to ensure GPU memory cleanup and model deletion happen even if exceptions occur during generation.
-- Added a check `if model:` in the `finally` block to prevent errors if model loading failed and `model` is `None`.
-- Overall, these changes significantly improve the structure, readability, error handling, and maintainability of the `LLaDAWorker` class. The code is now more modular, easier to understand, and more robust to potential errors during model loading and generation.
-```
