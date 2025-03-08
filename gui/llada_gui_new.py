@@ -45,10 +45,10 @@ class LLaDAGUINew(QMainWindow):
 
         # 2.2. Sidebar (Right - Scrollable)
         self.sidebar_scroll_area = QScrollArea()
-        self.sidebar_scroll_area.setWidgetResizable(True) # Important for scroll area to work correctly
-        self.sidebar_widget = QWidget() # Widget to hold sidebar content
-        self.sidebar_layout = QVBoxLayout(self.sidebar_widget) # Layout for sidebar content
-        self.sidebar_scroll_area.setWidget(self.sidebar_widget) # Set widget to scroll area
+        self.sidebar_scroll_area.setWidgetResizable(True)  # Important for scroll area to work correctly
+        self.sidebar_widget = QWidget()  # Widget to hold sidebar content
+        self.sidebar_layout = QVBoxLayout(self.sidebar_widget)  # Layout for sidebar content
+        self.sidebar_scroll_area.setWidget(self.sidebar_widget)  # Set widget to scroll area
         viz_sidebar_layout.addWidget(self.sidebar_scroll_area)
 
         # Sidebar Sections (Placeholders for now)
@@ -57,7 +57,7 @@ class LLaDAGUINew(QMainWindow):
         # 3. Status Bar (Bottom)
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready") # Initial status message
+        self.status_bar.showMessage("Ready")  # Initial status message
 
         # Set the central widget
         self.setCentralWidget(main_widget)
@@ -68,30 +68,37 @@ class LLaDAGUINew(QMainWindow):
         # Generation Settings ⚙️
         generation_group = QGroupBox("⚙️ Generation Settings")
         generation_layout = QVBoxLayout()
-        generation_layout.addWidget(QLabel("Generation Options Here")) # Placeholder
+        generation_layout.addWidget(QLabel("Generation Options Here"))  # Placeholder
         generation_group.setLayout(generation_layout)
         self.sidebar_layout.addWidget(generation_group)
 
         # Model & Hardware 🧠
         model_group = QGroupBox("🧠 Model & Hardware")
         model_layout = QVBoxLayout()
-        model_layout.addWidget(QLabel("Model/Hardware Options Here")) # Placeholder
+        model_layout.addWidget(QLabel("Model/Hardware Options Here"))  # Placeholder
         model_group.setLayout(model_layout)
         self.sidebar_layout.addWidget(model_group)
 
         # Memory Integration 💾
         memory_group = QGroupBox("💾 Memory Integration")
         memory_layout = QVBoxLayout()
-        memory_layout.addWidget(QLabel("Memory Options Here")) # Placeholder
+        memory_layout.addWidget(QLabel("Memory Options Here"))  # Placeholder
         memory_group.setLayout(memory_layout)
         self.sidebar_layout.addWidget(memory_group)
 
         # Realtime Statistics 📊
         stats_group = QGroupBox("📊 Realtime Statistics")
         stats_layout = QVBoxLayout()
-        stats_layout.addWidget(QLabel("Statistics Display Here")) # Placeholder
+        stats_layout.addWidget(QLabel("Statistics Display Here"))  # Placeholder
         stats_group.setLayout(stats_layout)
         self.sidebar_layout.addWidget(stats_group)
+
+        # Visualization Settings 👁️
+        viz_settings_group = QGroupBox("👁️ Visualization Settings")
+        viz_settings_layout = QVBoxLayout()
+        viz_settings_layout.addWidget(QLabel("Visualization Options Here")) # Placeholder
+        viz_settings_group.setLayout(viz_settings_layout)
+        self.sidebar_layout.addWidget(viz_settings_group)
 
         # Add stretch to bottom to push groups to the top
         self.sidebar_layout.addStretch(1)
