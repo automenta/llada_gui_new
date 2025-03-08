@@ -239,15 +239,36 @@ class LLaDAGUINew(QMainWindow):
 
         # Realtime Statistics 📊
         stats_group = QGroupBox("📊 Realtime Statistics")
-        stats_layout = QVBoxLayout()
-        stats_layout.addWidget(QLabel("Statistics Display Here"))  # Placeholder
+        stats_layout = QGridLayout()
+
+        # Token Rate Display
+        self.token_rate_label = QLabel("Token Rate: - tokens/s")
+        stats_layout.addWidget(self.token_rate_label, 0, 0)
+
+        # Step Time Display
+        self.step_time_label = QLabel("Step Time: - ms/step")
+        stats_layout.addWidget(self.step_time_label, 1, 0)
+
+        # Detailed Memory Usage Display (Placeholder - expandable later)
+        self.detailed_memory_label = QLabel("Memory Usage: - ")
+        stats_layout.addWidget(self.detailed_memory_label, 2, 0)
+
+
         stats_group.setLayout(stats_layout)
         self.sidebar_layout.addWidget(stats_group)
 
         # Visualization Settings 👁️
         viz_settings_group = QGroupBox("👁️ Visualization Settings")
         viz_settings_layout = QVBoxLayout()
-        viz_settings_layout.addWidget(QLabel("Visualization Options Here")) # Placeholder
+
+        # Visualization Type Selection
+        self.visualization_type_combo = QComboBox()
+        self.visualization_type_combo.addItems(["Token Stream", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
+        self.visualization_type_combo.currentTextChanged.connect(lambda text: print(f"Visualization type changed: {text}")) # Placeholder
+        viz_settings_layout.addWidget(QLabel("Visualization Type:"))
+        viz_settings_layout.addWidget(self.visualization_type_combo)
+
+
         viz_settings_group.setLayout(viz_settings_layout)
         self.sidebar_layout.addWidget(viz_settings_group)
 
