@@ -186,6 +186,7 @@ class LLaDAWorker(QThread):
                 model_path, trust_remote_code=True, torch_dtype=dtype,
                 device_map="auto" if device == 'cuda' else None, cache_dir="data", resume_download=True
             )
+            model.tie_weights()  # Explicitly tie weights
             if device == 'cpu':
                 model = model.to('cpu')
             model.eval() # Ensure eval mode
@@ -204,7 +205,9 @@ class LLaDAWorker(QThread):
         """Tokenizes the input prompt and handles potential errors."""
         try:
             self.progress.emit(30, "Tokenizing input...", {})
+
             messages = [{"role": "user", "content": self.prompt}]
+
             user_input = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             input_ids = tokenizer(user_input)['input_ids']
             input_ids_tensor = torch.tensor(input_ids, device=device).unsqueeze(0) # Create tensor once
