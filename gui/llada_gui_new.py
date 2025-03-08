@@ -404,10 +404,13 @@ class LLaDAGUINew(QMainWindow):
         # Memory usage indicators in status bar
         self.ram_indicator = QProgressBar()
         self.ram_indicator.setTextVisible(False) # Hide percentage text
-        self.ram_indicator.setFixedWidth(100) # Fixed width for compact look
+        self.ram_indicator.setFixedHeight(8) # Compact height
+        self.ram_indicator.setStyleSheet("QProgressBar { border: 1px solid grey; border-radius: 2px; text-align: center; } QProgressBar::chunk {background-color: #05B8CC; width: 1px;}") # Basic styling
         self.gpu_indicator = QProgressBar()
         self.gpu_indicator.setTextVisible(False) # Hide percentage text
-        self.gpu_indicator.setFixedWidth(100) # Fixed width for compact look
+        self.gpu_indicator.setFixedHeight(8) # Compact height
+        self.gpu_indicator.setStyleSheet("QProgressBar { border: 1px solid grey; border-radius: 2px; text-align: center; } QProgressBar::chunk {background-color: #05B8CC; width: 1px;}") # Basic styling
+
         self.status_bar.addPermanentWidget(QLabel("RAM:"))
         self.status_bar.addPermanentWidget(self.ram_indicator)
         self.status_bar.addPermanentWidget(QLabel("VRAM:"))
