@@ -259,14 +259,21 @@ class LLaDAGUINew(QMainWindow):
 
         # Visualization Settings 👁️
         viz_settings_group = QGroupBox("👁️ Visualization Settings")
-        viz_settings_layout = QVBoxLayout()
+        viz_settings_layout = QGridLayout()
 
         # Visualization Type Selection
         self.visualization_type_combo = QComboBox()
         self.visualization_type_combo.addItems(["Token Stream", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
         self.visualization_type_combo.currentTextChanged.connect(lambda text: print(f"Visualization type changed: {text}")) # Placeholder
-        viz_settings_layout.addWidget(QLabel("Visualization Type:"))
-        viz_settings_layout.addWidget(self.visualization_type_combo)
+        viz_settings_layout.addWidget(QLabel("Type:"), 0, 0)
+        viz_settings_layout.addWidget(self.visualization_type_combo, 0, 1)
+
+        # Color Scheme Selection (Example Parameter)
+        self.color_scheme_combo = QComboBox()
+        self.color_scheme_combo.addItems(["Cool", "Warm", "GrayScale"]) # Example schemes
+        self.color_scheme_combo.currentTextChanged.connect(lambda text: print(f"Color Scheme changed: {text}")) # Placeholder
+        viz_settings_layout.addWidget(QLabel("Color Scheme:"), 1, 0)
+        viz_settings_layout.addWidget(self.color_scheme_combo, 1, 1)
 
 
         viz_settings_group.setLayout(viz_settings_layout)
