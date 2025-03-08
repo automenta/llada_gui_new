@@ -12,7 +12,6 @@ This version implements several optimizations:
 import logging
 from typing import Optional, Callable, List
 
-import torch
 import torch.nn.functional as F
 from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like, empty, div, \
     int64, cat, where, Tensor, gather, tensor, zeros, argmax, rand_like, device, linspace, \
@@ -21,14 +20,10 @@ from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like
 logger = logging.getLogger(__name__)
 
 
-def f32(x, device):
-    return tensor([x], dtype=torch.float32, device=device)
-
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 CPU_DEVICE = device("cpu")
 MASK_TOKEN_ID_DEFAULT = 126336  # Default mask token ID
 CONFIDENCE_THRESHOLD_DEFAULT = 0.9  # Default confidence threshold
-#EPSILON = f32(1e-10, DEVICE)  # Small value to avoid log(0)
 EPSILON = 1e-10
 
 
@@ -271,18 +266,17 @@ def remaskConf(logits:Tensor, temperature:float, x0:Tensor)->Tensor:
     return gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
 
-def _process_generation_step(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
-                             memory_integration, temperature, remasking, step,
-                             num_transfer_tokens, block_start, block_end, mask_index) -> tuple[Tensor, Tensor, Tensor]:
-    """Helper function to process a single generation step within a block."""
+def generateStep(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
+                 memory_integration, temperature, remasking, step,
+                 num_transfer_tokens, block_start, block_end, mask_index) -> tuple[Tensor, Tensor, Tensor]:
+    """Inner iteration of generate"""
 
     x0, x0_p = logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index,
                            remasking, temperature, x)
 
     # Restrict confidence to current block
     confidence = where(mask_index, x0_p, tensor(-float('inf'), device=x.device))
-    confidence[:, :block_start] = -float('inf')
-    confidence[:, block_end:] = -float('inf')
+    confidence[:, :block_start] = confidence[:, block_end:] = -float('inf')
 
     # Select and transfer tokens
     transfer_index = select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
@@ -357,7 +351,15 @@ def generate(
             steps = steps_per_block * num_blocks
             logger.warning(f"Adjusted steps to {steps} to be divisible by num_blocks {num_blocks}")
     else:
-        steps_per_block_list = [max(4, int(steps / num_blocks * (0.8 ** b))) for b in range(num_blocks)]
+        # Adaptive scheduling - use more steps for early blocks, fewer for later ones
+        steps_per_block_list = []
+        for b in range(num_blocks):
+            # Decay step count for later blocks
+            decay_factor = 0.8 ** b
+            block_steps = max(4, int(steps / num_blocks * decay_factor))
+            steps_per_block_list.append(block_steps)
+
+        # Normalize to ensure we use approximately the requested total steps
         total_steps = sum(steps_per_block_list)
         if total_steps != steps:
             steps_per_block_list = [max(4, int(s * steps / total_steps)) for s in steps_per_block_list]
@@ -394,7 +396,7 @@ def generate(
                 break
 
             # Process generation step in helper function
-            x0, transfer_index, confidence = _process_generation_step( # Get confidence here
+            x0, transfer_index, confidence = generateStep( # Get confidence here
                 model, x, cfg_scale, chunk_size, mask_id, prompt_index,
                 memory_integration, temperature, remasking, i,
                 num_transfer_tokens, block_start, block_end, mask_index

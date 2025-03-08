@@ -454,14 +454,6 @@ class LLaDAGUINew(QMainWindow):
         hw_memory_layout.addWidget(device_label, 0, 0)
         hw_memory_layout.addWidget(self.cpu_radio, 0, 1); hw_memory_layout.addWidget(self.gpu_radio, 0, 2)
 
-        precision_label, _ = self._create_labeled_widget("Precision:")
-        self.precision_group = QButtonGroup()
-        self.use_normal = QRadioButton("Normal"); self.use_8bit = QRadioButton("8-bit"); self.use_4bit = QRadioButton("4-bit")
-        self.use_8bit.setChecked(True)
-        self.precision_group.addButton(self.use_normal, 0); self.precision_group.addButton(self.use_8bit, 1); self.precision_group.addButton(self.use_4bit, 2)
-        hw_memory_layout.addWidget(precision_label, 1, 0)
-        hw_memory_layout.addWidget(self.use_normal, 1, 1); hw_memory_layout.addWidget(self.use_8bit, 1, 2); hw_memory_layout.addWidget(self.use_4bit, 1, 3)
-
         self.extreme_mode_checkbox = QCheckBox("Extreme Mode"); self.extreme_mode_checkbox.setToolTip("Enable extreme memory optimizations")
         self.fast_mode_checkbox = QCheckBox("Fast Mode"); self.fast_mode_checkbox.setToolTip("Enable faster generation (lower quality)")
         self.enable_memory_checkbox = QCheckBox("Enable Memory Integration"); self.enable_memory_checkbox.setToolTip("Enable memory integration for context-aware generation")
@@ -768,8 +760,6 @@ class LLaDAGUINew(QMainWindow):
         device = settings.value("device", "cuda" if torch.cuda.is_available() else "cpu")
         if device == "cuda" and torch.cuda.is_available(): self.gpu_radio.setChecked(True)
         else: self.cpu_radio.setChecked(True)
-        self.use_8bit.setChecked(bool(settings.value("use_8bit", True)))
-        self.use_4bit.setChecked(bool(settings.value("use_4bit", False)))
         self.extreme_mode_checkbox.setChecked(bool(settings.value("extreme_mode", False)))
         self.fast_mode_checkbox.setChecked(bool(settings.value("fast_mode", False)))
         self.enable_memory_checkbox.setChecked(bool(settings.value("use_memory", False)))

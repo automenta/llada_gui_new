@@ -179,12 +179,7 @@ class LLaDAWorker(QThread):
             self.progress.emit(5, f"Starting with device: {device}", {})
 
             model_path = get_model_path()
-            precision_key = "normal"
-            if self.config.get('use_8bit'):
-                precision_key = "8bit"
-            elif self.config.get('use_4bit'):
-                precision_key = "4bit"
-            cache_key = (model_path, precision_key, device)
+            cache_key = (model_path, device)
 
             # Check if model is in cache
             if cache_key in LLaDAWorker._model_cache:
@@ -291,19 +286,24 @@ class LLaDAWorker(QThread):
 
 
     def _load_model_and_tokenizer(self, model_path: str, device: str) -> tuple[AutoTokenizer, AutoModel]:
+        # dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
+        #dtype = torch.float32
+        dtype = torch.float16
+
         """Loads the tokenizer and model, emitting progress signals and handling errors."""
         try:
             self.progress.emit(10, "Loading tokenizer...", {})
             dmap = "auto" if device == 'cuda' else None
-            tokenizer = AutoTokenizer.from_pretrained(model_path, device_map=dmap, trust_remote_code=True, use_fast=True, cache_dir="data")
+            tokenizer = AutoTokenizer.from_pretrained(model_path,
+                                                      torch_dtype=dtype,
+                                                      device_map=dmap, trust_remote_code=True, use_fast=True, cache_dir="data")
             if hasattr(tokenizer, 'mask_token_id') and tokenizer.mask_token_id is not None:
                 self.mask_id = tokenizer.mask_token_id # Update mask_id from tokenizer if available
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
 
             self.progress.emit(15, f"Loading model (device: {device})...", {})
-            dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
-            #dtype = torch.float16
+
             model = AutoModel.from_pretrained(
                 model_path, trust_remote_code=True,
                 torch_dtype=dtype,
