@@ -280,7 +280,7 @@ class GLVisualizationWidget(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
-            if image_
+            if image_data:
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
             self.text_textures[text] = texture_id
             self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
