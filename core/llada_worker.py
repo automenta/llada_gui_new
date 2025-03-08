@@ -246,8 +246,7 @@ class LLaDAWorker(QThread):
                 model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
                 block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
                 remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
-                mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size,
-                confidence_threshold=confidence_threshold
+                mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size
             )
             self.step_confidences = [step_confidences_tensor[i, :, :] for i in range(step_confidences_tensor.shape[0])] # Store step confidences
 

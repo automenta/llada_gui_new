@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+
 """
 Optimized generation algorithm for LLaDA models.
 This version implements several optimizations:
@@ -12,18 +13,18 @@ This version implements several optimizations:
 import logging
 from typing import Optional, Callable, List
 
+import torch
 import torch.nn.functional as F
 from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like, empty, div, \
     int64, cat, where, Tensor, gather, tensor, zeros, argmax, rand_like, device, linspace, \
     full
 
 logger = logging.getLogger(__name__)
-
+torch._dynamo.config.capture_scalar_outputs = True
 
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 CPU_DEVICE = device("cpu")
 MASK_TOKEN_ID_DEFAULT = 126336  # Default mask token ID
-CONFIDENCE_THRESHOLD_DEFAULT = 0.9  # Default confidence threshold
 EPSILON = 1e-10
 
 
@@ -47,10 +48,7 @@ class TokenBuffer:
 
     def update(self, data):
         """Update buffer with new data."""
-        if self._is_on_gpu or not self.cpu_offload:
-            self._data = data
-        else:
-            self._data = data.to(CPU_DEVICE)
+        self._data = data if self._is_on_gpu or not self.cpu_offload else data.to(CPU_DEVICE)
 
     def to_cpu(self):
         """Move data to CPU if not already there."""
@@ -69,8 +67,7 @@ class TokenBuffer:
         return TokenBuffer(self._data.clone(), self.device, self.cpu_offload)
 
 
-#@jit.script
-#@torch.compile
+@torch.compile
 def add_gumbel_noise(logits: Tensor, temperature: float, epsilon: float) -> Tensor:
     """
     Add Gumbel noise for sampling categorical distributions.
@@ -89,8 +86,8 @@ def add_gumbel_noise(logits: Tensor, temperature: float, epsilon: float) -> Tens
     return logits / gumbel_noise
 
 
-def get_adaptive_transfer_schedule(mask_index: Tensor, steps: int, min_steps: int = 4,
-                                   confidence_threshold: float = CONFIDENCE_THRESHOLD_DEFAULT) -> Tensor:
+@torch.compile
+def get_adaptive_transfer_schedule(mask_index: Tensor, steps: int) -> Tensor:
     """
     Create an adaptive schedule for token transfers, front-loading more tokens in earlier steps.
 
@@ -98,7 +95,6 @@ def get_adaptive_transfer_schedule(mask_index: Tensor, steps: int, min_steps: in
         mask_index: Boolean tensor indicating masked tokens
         steps: Number of steps to schedule
         min_steps: Minimum number of steps (default: 4)
-        confidence_threshold: Confidence threshold for token transfer (default: 0.9)
 
     Returns:
         Tensor of shape (batch_size, steps) with number of tokens to transfer per step
@@ -111,8 +107,9 @@ def get_adaptive_transfer_schedule(mask_index: Tensor, steps: int, min_steps: in
 
     for i in range(mask_num.size(0)):
         maski = mask_num[i]
-        weighted_tokens = (weights * (maski.item() / steps)).round().to(int64)
-        diff = maski.item() - weighted_tokens.sum().item()
+        mi = maski.item()
+        weighted_tokens = (weights * (mi / steps)).round().to(int64)
+        diff = mi - weighted_tokens.sum().item()
         if diff > 0:
             for j in range(diff):
                 weighted_tokens[j % steps] += 1
@@ -157,13 +154,11 @@ def _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
     if cfg_scale > 0:
         un_x = x.clone()
         un_x[prompt_index] = mask_id
-        x_ = cat([x, un_x], dim=0)
-        logits = chunk_processing(model, x_, chunk_size=chunk_size)
-        logits, un_logits = chunk(logits, 2, dim=0)
-        logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
+        logits, un_logits = chunk(chunk_processing(model, cat([x, un_x], dim=0), chunk_size=chunk_size), 2, dim=0)
+        return un_logits + (cfg_scale + 1) * (logits - un_logits)
     else:
-        logits = chunk_processing(model, x, chunk_size=chunk_size)
-    return logits
+        return chunk_processing(model, x, chunk_size=chunk_size)
+
 
 
 def apply_memory_guidance(logits, x, memory_integration, mask_index):
@@ -233,7 +228,6 @@ def select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
     return transfer_index
 
 
-
 def get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, x):
     logits = _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
     logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
@@ -250,6 +244,7 @@ def logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, 
         logits = add_gumbel_noise(logits, temperature, EPSILON)
 
     x0 = argmax(logits, dim=-1)
+
     # Compute confidence for remasking
     if remasking == 'low_confidence':
         x0_p = remaskConf(logits, temperature, x0)
@@ -260,7 +255,7 @@ def logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, 
     return x0, x0_p
 
 
-#@torch.compile
+@torch.compile
 def remaskConf(logits:Tensor, temperature:float, x0:Tensor)->Tensor:
     p = F.softmax(logits / temperature if temperature > 0 else logits, dim=-1) # Apply temperature scaling to logits before softmax, or if temperature is <=0, use standard softmax
     return gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
@@ -298,7 +293,6 @@ def generate(
     adaptive_steps: bool = True,
     progress_callback: Optional[Callable[[float, Tensor], None]] = None,
     memory_integration=None,
-    confidence_threshold: float = CONFIDENCE_THRESHOLD_DEFAULT,
     chunk_size: int = 512,
     device: device = DEVICE
 ) -> Tensor:
@@ -319,7 +313,6 @@ def generate(
         adaptive_steps: Use adaptive step scheduling (default: True)
         progress_callback: Optional callback for progress updates
         memory_integration: Optional memory integration module
-        confidence_threshold: Confidence threshold (default: CONFIDENCE_THRESHOLD_DEFAULT)
         chunk_size: Chunk size for processing long sequences (default: 512)
         device: Device for computation (default: DEVICE)
 
@@ -379,7 +372,7 @@ def generate(
 
         # Compute transfer schedule
         num_transfer_tokens = (
-            get_adaptive_transfer_schedule(block_mask_index, steps_per_block, confidence_threshold=confidence_threshold)
+            get_adaptive_transfer_schedule(block_mask_index, steps_per_block)
             if adaptive_steps else
             div(block_mask_index.sum(dim=1, keepdim=True), steps_per_block, rounding_mode='floor').repeat(1, steps_per_block)
         )
