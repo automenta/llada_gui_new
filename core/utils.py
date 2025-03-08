@@ -23,6 +23,12 @@ from core.config import LOCAL_MODEL_PATH, DEFAULT_MODEL_PATH
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Define constants
+NO_GPU_TEXT = "No GPU Available"
+_cached_model_path = None  # Cache for model path
+_cached_device_properties = None # Cache for device properties
+
+
 def get_device_status():
     """
     Retrieves and formats device status information (CPU and CUDA).
@@ -83,11 +89,14 @@ def cleanup_gpu_memory():
             torch.cuda.empty_cache()
             gc.collect() # Immediate garbage collection after cache clear
 
+            global _cached_device_properties # Use global keyword to modify the global cache
+            if _cached_device_properties is None:
+                _cached_device_properties = torch.cuda.get_device_properties(0)
+            total_memory = _cached_device_properties.total_memory / (1024 ** 3)
             used_memory = torch.cuda.memory_allocated() / (1024 ** 3)
-            total_memory = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             logger.info(
                 f"GPU memory usage post cleanup: {used_memory:.2f}GB / {total_memory:.2f}GB"
-            )
+             )
 
         except Exception as e:
             logger.warning(f"GPU memory cleanup encountered an issue: {e}")
@@ -95,17 +104,17 @@ def cleanup_gpu_memory():
 
 def optimize_model_memory(model):
     """
-    Applies memory optimization techniques to the given model.
+     Applies memory optimization techniques to the given model.
 
-    Currently focuses on disabling cache and enabling attention slicing
-    if available.
+     Currently focuses on disabling cache and enabling attention slicing
+     if available.
 
-    Args:
-        model: The model to be optimized.
+     Args:
+         model: The model to be optimized.
 
-    Returns:
-        The potentially optimized model.
-    """
+     Returns:
+         The potentially optimized model.
+     """
     if not torch.cuda.is_available():
         return model
 
@@ -116,7 +125,7 @@ def optimize_model_memory(model):
             model.config.use_cache = False  # Disable caching
 
         if hasattr(model, "enable_attention_slicing"):
-            logger.info("Attention slicing enabled.")
+            logger.debug("Attention slicing enabled.") # Changed log level to DEBUG
             model.enable_attention_slicing() # No size argument; using default
 
         # Future LLaDA-specific optimizations can be added here if needed.
@@ -135,11 +144,18 @@ def get_model_path():
     """
     Determines the correct model path, prioritizing the local model
     path if it exists.
+    Caches the result for subsequent calls.
 
     Returns:
         str: The path to the model.
     """
-    return LOCAL_MODEL_PATH if os.path.exists(LOCAL_MODEL_PATH) else DEFAULT_MODEL_PATH
+    global _cached_model_path
+    if _cached_model_path:
+        return _cached_model_path
+
+    model_path = LOCAL_MODEL_PATH if os.path.exists(LOCAL_MODEL_PATH) else DEFAULT_MODEL_PATH
+    _cached_model_path = model_path  # Cache the model path
+    return model_path
 
 
 def format_error(exception):
@@ -184,7 +200,7 @@ def format_memory_info(device_stats):
         gpu_percent = gpu_stat.get('used_percent', 0)
         gpu_text = f"{gpu_used:.2f} / {gpu_total:.2f} GB ({gpu_percent:.1f}%)"
     else:
-        gpu_text = "No GPU Available"
+        gpu_text = NO_GPU_TEXT # Using constant
 
     return system_text, gpu_text
 
@@ -247,7 +263,8 @@ class AttentionCache:
         self.model = model
         self.cache: Dict[str, Union[torch.Tensor, None]] = {} # Explicitly type cache
         self.cpu_offload = cpu_offload
-        self.CPU_DEVICE = self.DEVICE = None #TODO
+        self.CPU_DEVICE = torch.device("cpu") # Define CPU_DEVICE and DEVICE at init
+        self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def get(self, key: str, default=None) -> Union[torch.Tensor, None]:
         """Get a value from the cache, loading to the correct device if needed."""

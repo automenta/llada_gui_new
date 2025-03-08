@@ -177,8 +177,8 @@ def process_model(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
         logits = chunk_processing(model, x_, chunk_size=chunk_size)
         logits, un_logits = torch.chunk(logits, 2, dim=0)
         logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
-    else:
-        logits = chunk_processing(model, x, chunk_size=chunk_size)
+
+    logits = chunk_processing(model, x, chunk_size=chunk_size)
     return logits
 
 

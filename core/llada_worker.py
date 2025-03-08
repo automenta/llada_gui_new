@@ -17,6 +17,8 @@ from core.generate import generate  # Import from our optimized generate.py
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Define constants
+MEMORY_WARNING_THRESHOLD_GB = 1.0
 
 class LLaDAWorker(QThread):
     """Worker thread for handling LLaDA generation."""
@@ -108,7 +110,7 @@ class LLaDAWorker(QThread):
             if device == 'cuda':
                 cleanup_gpu_memory()
                 free_memory = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) - ((torch.cuda.memory_allocated(0) + torch.cuda.memory_reserved(0)) / (1024 ** 3)) # Simplified calculation
-                if free_memory < 1.0:
+                if free_memory < MEMORY_WARNING_THRESHOLD_GB:
                     self.memory_warning.emit(f"Low GPU memory warning: Only {free_memory:.2f}GB available. CPU offloading will be enabled.")
 
             model_path = get_model_path()
@@ -188,7 +190,7 @@ class LLaDAWorker(QThread):
             tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=True, cache_dir="data")
             if hasattr(tokenizer, 'mask_token_id') and tokenizer.mask_token_id is not None:
                 self.mask_id = tokenizer.mask_token_id # Update mask_id from tokenizer if available
-
+            # tokenizer.mask_token_id = tokenizer.mask_token_id or MASK_TOKEN_ID_DEFAULT # Alternative default setting
             self.progress.emit(15, f"Loading model (device: {device})...", {})
             dtype = torch.float16 if device == 'cuda' else torch.float32 # Consistent dtype setting
             model = AutoModel.from_pretrained(
@@ -218,7 +220,7 @@ class LLaDAWorker(QThread):
             messages = [{"role": "user", "content": self.prompt}]
 
             user_input = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            input_ids = tokenizer(user_input)['input_ids']
+            input_ids = tokenizer(user_input)['input_ids'] # Consider pre-compiling tokenizer for speed
             input_ids_tensor = torch.tensor(input_ids, device=device).unsqueeze(0) # Create tensor once
 
             return input_ids_tensor
