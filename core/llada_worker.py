@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Callable, Dict, Any
 
 import torch
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from transformers import AutoTokenizer, AutoModel
 
 from core.utils import cleanup_gpu_memory, get_model_path, format_error
@@ -34,10 +34,15 @@ class LLaDAWorker(QThread):
         self.current_step = 0
         self.total_steps = config.get('steps', 64)
         self.mask_id = 126336  # Default mask token ID - Consider making configurable via config
+        self.cleanup_timer = QTimer(self)
+        self.cleanup_timer.timeout.connect(self._delayed_cleanup_gpu_memory)
+        self.memory_cleanup_delay = config.get('memory_cleanup_delay', 300000) # Default 5 minutes in milliseconds
 
     def stop(self):
         """Stop the generation process."""
         self.stopped = True
+        if self.cleanup_timer.isActive():
+            self.cleanup_timer.stop() # Stop timer if generation is stopped
 
     def update_progress(self, progress_percentage: float, tokens: Optional[torch.Tensor] = None):
         """
@@ -92,6 +97,10 @@ class LLaDAWorker(QThread):
         model = None # Initialize model and tokenizer outside try block for broader scope
         tokenizer = None
         try:
+            # Stop any existing timer in case of rapid re-generation requests
+            if self.cleanup_timer.isActive():
+                self.cleanup_timer.stop()
+
             # Determine device
             device = 'cuda' if torch.cuda.is_available() and self.config['device'] == 'cuda' else 'cpu'
             self.progress.emit(5, f"Starting with device: {device}", {})
@@ -156,18 +165,18 @@ class LLaDAWorker(QThread):
             self.progress.emit(100, "Generation complete", {'output': answer})
             self.finished.emit(answer)
 
+            # Start the delayed cleanup timer after successful generation
+            if device == 'cuda':
+                self.cleanup_timer.start(self.memory_cleanup_delay)
+
+
         except Exception as e:
             logger.error(f"Unhandled exception: {e}")
             self.error.emit(format_error(e))
+            if self.cleanup_timer.isActive():
+                self.cleanup_timer.stop() # Stop timer in case of error
 
-        finally: # Ensure cleanup even if errors occur
-            if model: # Check if model is loaded before trying to delete
-                try:
-                    del model
-                except Exception as cleanup_e:
-                    logger.error(f"Error during model cleanup: {cleanup_e}")
-            if torch.cuda.is_available():
-                cleanup_gpu_memory()
+        # finally block removed - cleanup is now handled by timer
 
 
     def _load_model_and_tokenizer(self, model_path: str, device: str) -> tuple[AutoTokenizer, AutoModel]:
@@ -219,3 +228,9 @@ class LLaDAWorker(QThread):
             logger.error(error_msg)
             self.error.emit(error_msg)
             return None # Indicate input preparation failure
+
+    def _delayed_cleanup_gpu_memory(self):
+        """Perform delayed GPU memory cleanup."""
+        logger.info("Performing delayed GPU memory cleanup...")
+        cleanup_gpu_memory()
+        self.cleanup_timer.stop() # Ensure timer is stopped after cleanup
