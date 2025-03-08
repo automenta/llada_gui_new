@@ -5,6 +5,7 @@ LLaDA GUI - New OpenGL Visualization-Centric GUI for LLaDA.
 """
 
 import sys
+import random
 
 import torch
 from PyQt6.QtCore import Qt, QTimer
@@ -20,6 +21,7 @@ from PyQt6.QtOpenGL import QOpenGLVersionProfile, QSurfaceFormat
 
 from OpenGL.GL import *  # pylint: disable=W0614,W0611
 
+
 # Import default parameters
 from core.config import DEFAULT_GENERATION_PARAMS as DEFAULT_PARAMS
 
@@ -29,6 +31,18 @@ class GLVisualizationWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.object = 0
+        self.visualization_type = "Token Stream" # Default visualization type
+        self.token_stream_data = [] # Placeholder for token stream data
+
+    def set_visualization_type(self, viz_type):
+        """Set the current visualization type."""
+        self.visualization_type = viz_type
+        self.update() # Trigger repaint
+
+    def set_token_stream_data(self, data):
+        """Set data for token stream visualization."""
+        self.token_stream_data = data
+        self.update()
 
     def initializeGL(self):
         """Initialize OpenGL context and settings."""
@@ -45,7 +59,13 @@ class GLVisualizationWidget(QOpenGLWidget):
         """Paint the OpenGL scene."""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        # Simple colored square for testing
+        if self.visualization_type == "Token Stream":
+            self.draw_token_stream()
+        else:
+            self.draw_test_square() # Default or fallback visualization
+
+    def draw_test_square(self):
+        """Draw a simple colored square for testing."""
         glBegin(GL_QUADS)
         glColor3f(1.0, 1.0, 0.0) # Yellow color
         glVertex2f(-0.5, -0.5)
@@ -53,6 +73,32 @@ class GLVisualizationWidget(QOpenGLWidget):
         glVertex2f(0.5, 0.5)
         glVertex2f(-0.5, 0.5)
         glEnd()
+
+    def draw_token_stream(self):
+        """Draw the Token Stream visualization."""
+        glColor3f(0.8, 0.8, 0.8)  # Light gray for tokens
+        num_tokens = 20 # Example number of tokens to display
+        spacing = 0.1
+        start_x = - (num_tokens - 1) * spacing / 2 # Center tokens
+
+        for i in range(num_tokens):
+            x = start_x + i * spacing
+            y = 0 # Center vertically
+            size = 0.05 + (i % 5) * 0.01 # Varying size for effect
+
+            # Example dynamic color - could be based on token data later
+            hue = (i * 30) % 360 / 360.0
+            color = QColor.fromHslF(hue, 1.0, 0.5)
+            glColor3f(color.redF(), color.greenF(), color.blueF())
+
+
+            glBegin(GL_QUADS)
+            glVertex2f(x - size, y - size)
+            glVertex2f(x + size, y - size)
+            glVertex2f(x + size, y + size)
+            glVertex2f(x - size, y + size)
+            glEnd()
+
 
     def resizeGL(self, width, height):
         """Handle viewport resizing."""
@@ -263,8 +309,8 @@ class LLaDAGUINew(QMainWindow):
 
         # Visualization Type Selection
         self.visualization_type_combo = QComboBox()
-        self.visualization_type_combo.addItems(["Token Stream", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
-        self.visualization_type_combo.currentTextChanged.connect(lambda text: print(f"Visualization type changed: {text}")) # Placeholder
+        self.visualization_type_combo.addItems(["Token Stream", "Test Square", "Memory Influence Map", "Abstract Token Cloud"]) # Example types
+        self.visualization_type_combo.currentTextChanged.connect(self.opengl_viz_widget.set_visualization_type)
         viz_settings_layout.addWidget(QLabel("Type:"), 0, 0)
         viz_settings_layout.addWidget(self.visualization_type_combo, 0, 1)
 
