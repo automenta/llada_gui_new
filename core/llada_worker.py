@@ -5,17 +5,17 @@ LLaDA Model Generation: worker thread
 """
 
 import logging
-from typing import Optional, Callable, Dict, Any
 import time
+from typing import Optional, Dict, Any
 
-import torch
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
-from transformers import AutoTokenizer, AutoModel
 import numpy as np
+import torch
+from PyQt6.QtCore import QThread, pyqtSignal
+from transformers import AutoTokenizer, AutoModel
 
-from core.utils import cleanup_gpu_memory, get_device_status, get_model_path, format_error
 from core.generate import generate  # Import from our optimized generate.py
-from core.generation_mode import GenerationMode # Import GenerationMode Enum
+from core.generation_mode import GenerationMode  # Import GenerationMode Enum
+from core.utils import cleanup_gpu_memory, get_device_status, get_model_path, format_error
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class LLaDAWorker(QThread):
         try:
             token_ids = tokens[0].cpu().tolist()
             mask_indices = [1 if t == self.mask_id else 0 for t in token_ids]
-            token_display = ["[MASK]" if t == self.mask_id else str(t) for t in token_ids] # List comprehension
+            #token_display = ["[MASK]" if t == self.mask_id else str(t) for t in token_ids] # List comprehension
             confidence_scores = [0.0 if m else 1.0 for m in mask_indices] # Initial confidence scores (can be refined later)
             mask_indices_bool = [bool(m) for m in mask_indices] # List comprehension
 
@@ -126,7 +126,6 @@ class LLaDAWorker(QThread):
     def _emit_realtime_stats(self):
         """Calculate and emit realtime statistics."""
         current_time = time.time()
-        step_time = 0
         if self.last_step_time is not None:
             step_time = (current_time - self.last_step_time) * 1000 # in milliseconds
             self.step_times.append(step_time)
@@ -307,7 +306,9 @@ class LLaDAWorker(QThread):
                 model_path, trust_remote_code=True, torch_dtype=dtype,
                 device_map="auto" if device == 'cuda' else None, cache_dir="data",
                 low_cpu_mem_usage=True,
-                **( {'attn_implementation': 'flash_attention_2', 'torch_compile': True} if device == 'cuda' else {} ) # Conditionally enable FlashAttention-2 and torch_compile
+
+                #**( {'attn_implementation': 'flash_attention_2', #not supported yet
+                #     'torch_compile': True} if device == 'cuda' else {} ) # Conditionally enable FlashAttention-2 and torch_compile
             )
 
             # Resize embeddings for special tokens if needed

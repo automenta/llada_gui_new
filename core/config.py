@@ -27,8 +27,8 @@ DEFAULT_GENERATION_PARAMS = {
     'gen_length': 128,
     'steps': 128,
     'block_length': 32,
-    'temperature': 1.0,
-    'cfg_scale': 3.0,
+    'temperature': 0,
+    'cfg_scale': 0,
     'remasking': 'low_confidence',
 }
 
@@ -50,7 +50,7 @@ MEMORY_MONITORING_SETTINGS = {
 
 # Memory integration constants - Grouped memory integration related constants
 MEMORY_INTEGRATION_SETTINGS = {
-    'memory_enabled': True,
+    'memory_enabled': False,
     'memory_server_port': 3000,
     'memory_data_dir': os.path.join(APP_PATH, "data", "memory"),
 }

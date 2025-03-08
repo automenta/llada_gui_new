@@ -85,7 +85,7 @@ def cleanup_gpu_memory():
     Attempts to clean up GPU memory by clearing CUDA cache and
     triggering garbage collection.
     """
-    logger.info("Initiating GPU memory cleanup...")
+    #logger.info("Initiating GPU memory cleanup...")
 
     gc.collect()
 
@@ -100,7 +100,7 @@ def cleanup_gpu_memory():
             total_memory = _cached_device_properties.total_memory / (1024 ** 3)
             used_memory = torch.cuda.memory_allocated() / (1024 ** 3)
             logger.info(
-                f"GPU memory usage post cleanup: {used_memory:.2f}GB / {total_memory:.2f}GB"
+                f"GPU memory cleanup: {used_memory:.2f}GB / {total_memory:.2f}GB"
              )
 
         except Exception as e:
@@ -123,7 +123,7 @@ def optimize_model_memory(model):
     if not torch.cuda.is_available():
         return model
 
-    logger.info("Applying model memory optimizations...")
+    logger.info("Optimizing model memory...")
 
     try:
         if hasattr(model, "config"):

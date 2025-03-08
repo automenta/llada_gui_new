@@ -70,10 +70,16 @@ class LladaVis(QOpenGLWidget):
     def set_show_probability_bar(self, show_bar): self.show_probability_bar = show_bar; self.update()
 
     def initializeGL(self):
-        if not self.context().isValid():
+        ctx = self.context()
+        if not ctx.isValid():
             raise RuntimeError("Failed to create a valid OpenGL context")
-        if self.context().format().majorVersion() < 3:
+        format = ctx.format()
+        if format.majorVersion() < 3:
             print("Warning: OpenGL 3.3+ not supported.")
+        format.setSwapInterval(1) # Enable V-Sync
+        if not ctx.setFormat(format):
+           print("Warning: Could not set V-Sync, continuing without.")
+
         glClearColor(0.1, 0.1, 0.2, 1.0)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -178,7 +184,7 @@ class LladaVis(QOpenGLWidget):
             text_to_render = self.token_stream_data_strings[i] if self.token_stream_data_mode == "Decoded Tokens" else str(self.token_stream_data_strings[i])
 
             self.draw_shape(shape, x - self.token_spacing * 0.3, y - self.token_size * 2, size, color)
-            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, text_to_render, QColor(200, 200, 220), font_size=10)
+            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, text_to_render, QColor(200, 200, 220))
 
             if self.show_probability_bar:
                 prob_bar_height = confidence * 0.1
@@ -245,7 +251,6 @@ class LladaVis(QOpenGLWidget):
         return color_scheme_funcs.get(self.color_scheme_name, lambda h: QColor.fromHslF(h * 0.5 + 0.5, 0.8, 0.7))(hue)
 
     def render_text(self, x, y, text, color, font_size=16):
-        """Renders text using bitmap textures with caching."""
         if not text: return
         font = QFont("Arial", font_size)
         metrics = QFontMetrics(font)
@@ -265,7 +270,7 @@ class LladaVis(QOpenGLWidget):
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             image_data = image.bits().asstring(image.sizeInBytes()) if image.bits() else None
-            if image_
+            if image_data:
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, text_width, text_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, image_data)
             self.text_textures[text] = texture_id
             self.text_coords[text] = (text_width / (self.width() * self.zoom_level), text_height / (self.height() * self.zoom_level))
@@ -381,17 +386,10 @@ class LLaDAGUINew(QMainWindow):
         self.token_data_mode_combo.currentTextChanged.connect(self.on_token_stream_data_mode_changed)
         self.add_widget_to_grid(viz_settings_layout, "Token Data:", self.token_data_mode_combo, 7, 0)
 
-        self.colormap_combo = QComboBox()
-        colormap_names = ["Cool", "Warm", "GrayScale", "Rainbow", "CoolWarm", "Plasma"]
-        self.colormap_combo.addItems(colormap_names)
-        self.colormap_combo.setCurrentText("Cool")
-        self.colormap_combo.currentTextChanged.connect(self.vis.set_color_scheme)
-        self.add_widget_to_grid(viz_settings_layout, "Colormap:", self.colormap_combo, 8, 0)
-
         self.show_prob_bar_checkbox = QCheckBox("Show Prob. Bar")
         self.show_prob_bar_checkbox.setChecked(True)
         self.show_prob_bar_checkbox.stateChanged.connect(lambda state: self.vis.set_show_probability_bar(state == Qt.CheckState.Checked))
-        self.add_widget_to_grid(viz_settings_layout, "Prob. Bar:", self.show_prob_bar_checkbox, 9, 0)
+        self.add_widget_to_grid(viz_settings_layout, "Prob. Bar:", self.show_prob_bar_checkbox, 8, 0)
 
         viz_settings_group.setLayout(viz_settings_layout)
         return viz_settings_group
@@ -560,7 +558,6 @@ class LLaDAGUINew(QMainWindow):
         self.token_size_spin.setEnabled(is_token_stream)
         self.token_spacing_spin.setEnabled(is_token_stream)
         self.token_data_mode_combo.setEnabled(is_token_stream)
-        self.colormap_combo.setEnabled(is_memory_map)
         self.show_prob_bar_checkbox.setEnabled(is_token_stream)
 
     def on_token_stream_data_mode_changed(self, mode):
@@ -680,7 +677,7 @@ class LLaDAGUINew(QMainWindow):
             self.block_length_spin, self.temperature_spin, self.cfg_scale_spin,
             self.remasking_combo, self.cpu_radio, self.gpu_radio, self.use_normal,
             self.use_8bit, self.use_4bit, self.extreme_mode_checkbox, self.fast_mode_checkbox,
-            self.enable_memory_checkbox, self.colormap_combo, self.show_prob_bar_checkbox,
+            self.enable_memory_checkbox, self.show_prob_bar_checkbox,
             self.keep_gpu_loaded_checkbox
         ]
         for element in ui_elements:
@@ -690,7 +687,6 @@ class LLaDAGUINew(QMainWindow):
         self.stop_button_status_bar.setEnabled(is_generating)
         self.token_shape_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
         self.token_data_mode_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
-        self.colormap_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Memory Influence Map")
         self.show_prob_bar_checkbox.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
 
 
@@ -711,7 +707,6 @@ class LLaDAGUINew(QMainWindow):
         self.vis.set_token_spacing(0.07)
         self.vis.set_zoom_level(1.0)
         self.token_data_mode_combo.setCurrentText("Decoded Tokens")
-        self.colormap_combo.setCurrentText("Cool")
         self.show_prob_bar_checkbox.setChecked(True)
         self.cancel_gpu_cleanup_timer() # Cancel cleanup on clear
 
@@ -753,7 +748,6 @@ class LLaDAGUINew(QMainWindow):
         s("fast_mode", self.fast_mode_checkbox.isChecked())
         s("use_memory", self.enable_memory_checkbox.isChecked())
         s("token_stream_data_mode", self.token_data_mode_combo.currentText())
-        s("colormap", self.colormap_combo.currentText())
         s("show_prob_bar", self.show_prob_bar_checkbox.isChecked())
         s("keep_gpu_loaded", self.keep_gpu_loaded_checkbox.isChecked())
 
@@ -780,7 +774,6 @@ class LLaDAGUINew(QMainWindow):
         self.fast_mode_checkbox.setChecked(bool(settings.value("fast_mode", False)))
         self.enable_memory_checkbox.setChecked(bool(settings.value("use_memory", False)))
         self.token_data_mode_combo.setCurrentText(settings.value("token_stream_data_mode", "Decoded Tokens"))
-        self.colormap_combo.setCurrentText(settings.value("colormap", "Cool"))
         self.show_prob_bar_checkbox.setChecked(bool(settings.value("show_prob_bar", True)))
         self.keep_gpu_loaded_checkbox.setChecked(bool(settings.value("keep_gpu_loaded", True)))
 
@@ -793,6 +786,7 @@ class LLaDAGUINew(QMainWindow):
         event.accept()
 
 
+
 def main():
     app = QApplication(sys.argv)
     window = LLaDAGUINew()
@@ -800,5 +794,25 @@ def main():
     sys.exit(app.exec())
 
 
+profile = False
+
 if __name__ == "__main__":
-    main()
+    if profile:
+        import cProfile
+        # "calls": (((1, -1),), "call count"),
+        # "ncalls": (((1, -1),), "call count"),
+        # "cumtime": (((3, -1),), "cumulative time"),
+        # "cumulative": (((3, -1),), "cumulative time"),
+        # "filename": (((4, 1),), "file name"),
+        # "line": (((5, 1),), "line number"),
+        # "module": (((4, 1),), "file name"),
+        # "name": (((6, 1),), "function name"),
+        # "nfl": (((6, 1), (4, 1), (5, 1),), "name/file/line"),
+        # "pcalls": (((0, -1),), "primitive call count"),
+        # "stdname": (((7, 1),), "standard name"),
+        # "time": (((2, -1),), "internal time"),
+        # "tottime": (((2, -1),), "internal time"),
+        sort = 'cumtime' #'time'
+        cProfile.run('main()', None, sort)
+    else:
+        main()
