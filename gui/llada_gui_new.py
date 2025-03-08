@@ -30,7 +30,7 @@ class GLVisualizationWidget(QOpenGLWidget):
         super().__init__(parent)
         self.parent_widget = parent
         self.visualization_type = "Token Stream"
-        self.token_stream_data_strings = [] # List of token display strings
+        self.token_stream_data_strings = [] # List of token display strings or token IDs
         self.token_stream_mask_indices = [] # List of mask indices (bool)
         self.token_stream_confidence_scores = [] # List of confidence scores
         self.memory_influence_data = None
@@ -50,13 +50,15 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.last_mouse_pos = None
         self.text_textures = {}  # Cache for glyph textures
         self.text_coords = {}   # Cache for glyph coordinates
+        self.token_stream_data_mode = "Decoded Tokens" # Default mode
 
     def set_visualization_type(self, viz_type): self.visualization_type = viz_type; self.update()
     def set_color_scheme(self, scheme): self.color_scheme = scheme; self.update()
-    def set_token_stream_data(self, strings, masks, confidences): # Update to accept lists
-        self.token_stream_data_strings = strings
+    def set_token_stream_data(self, data, masks, confidences, data_mode="Decoded Tokens"): # Update to accept lists and data_mode
+        self.token_stream_data_strings = data
         self.token_stream_mask_indices = masks
         self.token_stream_confidence_scores = confidences
+        self.token_stream_data_mode = data_mode # Store data mode
         self.update()
     def set_memory_influence_data(self, data): self.memory_influence_data = data; self.update()
     def set_token_shape(self, shape): self.token_shape = shape; self.update()
@@ -65,6 +67,8 @@ class GLVisualizationWidget(QOpenGLWidget):
     def set_token_spacing(self, spacing): self.token_spacing = spacing; self.update()
     def set_zoom_level(self, zoom): self.zoom_level = zoom; self.update()
     def set_pan(self, pan_x, pan_y): self.pan_x = pan_x; self.pan_y = pan_y; self.update()
+    def set_token_stream_data_mode(self, mode): self.token_stream_data_mode = mode; self.update()
+
 
     def initializeGL(self):
         if not self.context().isValid():
@@ -153,8 +157,14 @@ class GLVisualizationWidget(QOpenGLWidget):
                 size += confidence * 0.01 # Size varies with confidence
                 color = self.adjust_color_alpha(color, 0.5 + confidence * 0.5) # Alpha varies with confidence
 
+            text_to_render = ""
+            if self.token_stream_data_mode == "Decoded Tokens":
+                text_to_render = self.token_stream_data_strings[i]
+            elif self.token_stream_data_mode == "Token IDs":
+                text_to_render = str(self.token_stream_data_strings[i]) # Assuming token_stream_data_strings is now token IDs in this mode
+
             self.draw_shape(shape, x, y, size, color)
-            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, self.token_stream_data_strings[i], QColor(200, 200, 220), font_size=10) # Render token text below shape
+            self.render_text(x - self.token_spacing * 0.3, y - self.token_size * 2, text_to_render, QColor(200, 200, 220), font_size=10) # Render token text below shape
 
 
     def adjust_color_alpha(self, color, alpha_factor):
@@ -297,6 +307,7 @@ class LLaDAGUINew(QMainWindow):
         self.memory_monitor.update.connect(self.update_memory_status_bar)
         self.memory_monitor.start()
         self.worker = None
+        self.token_stream_data_mode = "Decoded Tokens" # Store token stream data mode
         self.setup_ui()
         self.load_settings()
 
@@ -366,6 +377,13 @@ class LLaDAGUINew(QMainWindow):
         self.zoom_level_spin.setRange(0.1, 5.0); self.zoom_level_spin.setValue(1.0); self.zoom_level_spin.setSingleStep(0.1)
         self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level)
         self.add_widget(viz_settings_layout, "Zoom Level:", self.zoom_level_spin, 6, 0)
+
+        self.token_data_mode_combo = QComboBox() # New ComboBox for token data mode
+        self.token_data_mode_combo.addItems(["Decoded Tokens", "Token IDs"])
+        self.token_data_mode_combo.setCurrentText("Decoded Tokens")
+        self.token_data_mode_combo.currentTextChanged.connect(self.on_token_stream_data_mode_changed) # Connect to new slot
+        self.add_widget(viz_settings_layout, "Token Data:", self.token_data_mode_combo, 7, 0) # Add to layout
+
 
         viz_settings_group.setLayout(viz_settings_layout)
         self.sidebar_layout.addWidget(viz_settings_group)
@@ -487,6 +505,12 @@ class LLaDAGUINew(QMainWindow):
         self.animation_speed_spin.setEnabled(is_token_stream or viz_type == "Abstract Token Cloud")
         self.token_size_spin.setEnabled(is_token_stream)
         self.token_spacing_spin.setEnabled(is_token_stream)
+        self.token_data_mode_combo.setEnabled(is_token_stream) # Enable/disable token data mode combo
+
+    def on_token_stream_data_mode_changed(self, mode): # New slot to handle token data mode change
+        self.token_stream_data_mode = mode
+        self.opengl_viz_widget.set_token_stream_data_mode(mode) # Pass mode to GL widget
+
 
     def get_generation_config(self):
         device = 'cuda' if self.gpu_radio.isChecked() and torch.cuda.is_available() else 'cpu'
@@ -527,7 +551,8 @@ class LLaDAGUINew(QMainWindow):
     def update_visualization(self, step, tokens, masks, confidences, token_ids): # Updated slot params
         print(f"Step: {step}, Tokens: {tokens[:10]}..., Masks: {masks[:10]}..., Confidences: {confidences[:10]}...")
         if self.opengl_viz_widget.visualization_type == "Token Stream":
-            self.opengl_viz_widget.set_token_stream_data(tokens, masks, confidences) # Pass lists to visualizer
+            data_to_visualize = tokens if self.token_stream_data_mode == "Decoded Tokens" else token_ids # Choose data based on mode
+            self.opengl_viz_widget.set_token_stream_data(data_to_visualize, masks, confidences, self.token_stream_data_mode) # Pass data and mode
         elif self.opengl_viz_widget.visualization_type == "Memory Influence Map":
             self.opengl_viz_widget.set_memory_influence_data(np.random.rand(32, 32)) # Keep dummy for now
 
@@ -555,6 +580,7 @@ class LLaDAGUINew(QMainWindow):
         self.token_size_spin.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
         self.token_spacing_spin.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream")
         self.zoom_level_spin.setEnabled(not is_generating)
+        self.token_data_mode_combo.setEnabled(not is_generating and self.visualization_type_combo.currentText() == "Token Stream") # Enable/disable token data mode combo
         self.gen_length_spin.setEnabled(not is_generating)
         self.steps_spin.setEnabled(not is_generating)
         self.block_length_spin.setEnabled(not is_generating)
@@ -587,6 +613,7 @@ class LLaDAGUINew(QMainWindow):
         self.opengl_viz_widget.set_token_spacing(0.07)
         self.zoom_level_spin.setValue(1.0)
         self.opengl_viz_widget.set_zoom_level(1.0)
+        self.token_data_mode_combo.setCurrentText("Decoded Tokens") # Reset token data mode
 
     @pyqtSlot(dict)
     def update_memory_status_bar(self, memory_stats):
@@ -625,6 +652,7 @@ class LLaDAGUINew(QMainWindow):
         settings.setValue("extreme_mode", self.extreme_mode_checkbox.isChecked())
         settings.setValue("fast_mode", self.fast_mode_checkbox.isChecked())
         settings.setValue("use_memory", self.enable_memory_checkbox.isChecked())
+        settings.setValue("token_stream_data_mode", self.token_data_mode_combo.currentText()) # Save token data mode
 
     def load_settings(self):
         settings = QSettings("MyCompany", "LLaDAGUI")
@@ -649,6 +677,7 @@ class LLaDAGUINew(QMainWindow):
         self.extreme_mode_checkbox.setChecked(bool(settings.value("extreme_mode", False)))
         self.fast_mode_checkbox.setChecked(bool(settings.value("fast_mode", False)))
         self.enable_memory_checkbox.setChecked(bool(settings.value("use_memory", False)))
+        self.token_data_mode_combo.setCurrentText(settings.value("token_stream_data_mode", "Decoded Tokens")) # Load token data mode
 
     def closeEvent(self, event):
         self.save_settings()
