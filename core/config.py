@@ -25,11 +25,11 @@ sys.path.append(os.path.join(APP_PATH, "gui"))
 DEFAULT_PARAMS = {
     # Optimized parameters for better performance on RTX 3060 and similar GPUs
     'gen_length': 128,  # Increased from 64 for better quality on 12GB GPUs
-    'steps': 128,       # Increased to match gen_length for optimal diffusion balance
-    'block_length': 32, 
+    'steps': 128,  # Increased to match gen_length for optimal diffusion balance
+    'block_length': 32,
     'temperature': 1.0,  # Standard temperature for creative text
-    'cfg_scale': 3.0,   # Standard CFG scale value for guided generation
-    'remasking': 'low_confidence', 
+    'cfg_scale': 3.0,  # Standard CFG scale value for guided generation
+    'remasking': 'low_confidence',
 }
 
 # Memory optimization constants
