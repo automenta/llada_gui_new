@@ -41,9 +41,11 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.animation_timer = QTimer(self) # Timer for animation
         self.animation_timer.timeout.connect(self.update) # Trigger repaint on timer
         self.animation_time = 0.0 # Time counter for animation
-        self.animation_speed = 0.01 # Animation speed factor
+        self.animation_speed = 0.01 # Animation speed factor - default
         self.animation_timer.start(20) # 20ms interval for ~50fps animation
         self.token_shape = "Circle" # Default token shape
+        self.token_size = 0.03 # Default token size
+        self.token_spacing = 0.07 # Default token spacing
 
 
     def set_visualization_type(self, viz_type):
@@ -64,6 +66,21 @@ class GLVisualizationWidget(QOpenGLWidget):
     def set_token_shape(self, shape):
         """Set the shape of tokens in visualizations."""
         self.token_shape = shape
+        self.update()
+
+    def set_animation_speed(self, speed):
+        """Set the animation speed factor."""
+        self.animation_speed = speed
+        self.update()
+
+    def set_token_size(self, size):
+        """Set the size of tokens in visualizations."""
+        self.token_size = size
+        self.update()
+
+    def set_token_spacing(self, spacing):
+        """Set the spacing between tokens in visualizations."""
+        self.token_spacing = spacing
         self.update()
 
 
@@ -107,14 +124,14 @@ class GLVisualizationWidget(QOpenGLWidget):
     def draw_token_stream(self):
         """Draw the Token Stream visualization."""
         num_tokens = 25 # Increased number of tokens for better stream
-        spacing = 0.07 # Reduced spacing for denser stream
+        spacing = self.token_spacing # Use parameter for spacing
         start_x = - (num_tokens - 1) * spacing / 2 # Center tokens
 
         for i in range(num_tokens):
             x = start_x + i * spacing
             y_offset = np.sin(self.animation_time * 2.0 + i * 0.5) * 0.02 # Wavy motion
             y = y_offset # Vertical wave motion
-            size = 0.03 + (i % 5) * 0.003 # Even smaller size variation, subtle
+            size = self.token_size + (i % 5) * 0.003 # Use parameter for base size, keep variation
 
             # Get color based on scheme
             color = self.get_token_color(i, num_tokens)
@@ -122,6 +139,7 @@ class GLVisualizationWidget(QOpenGLWidget):
 
             glPushMatrix() # Prepare transformation matrix for each token
             glTranslatef(x, y, 0.0) # Translate to token position
+            glRotatef(self.animation_time * 30 + i * 10, 0, 0, 1) # Example rotation - adjust as needed
 
             # Draw shape based on selected token_shape
             if self.token_shape == "Circle":
@@ -144,6 +162,13 @@ class GLVisualizationWidget(QOpenGLWidget):
                 glVertex2f(0, size)
                 glVertex2f(-size, -size)
                 glVertex2f(size, -size)
+                glVertex2f(size, -size)
+                glEnd()
+            elif self.token_shape == "Line": # Example line shape
+                glLineWidth(2.0) # Set line width
+                glBegin(GL_LINES)
+                glVertex2f(0, -size)
+                glVertex2f(0, size)
                 glEnd()
 
             glPopMatrix() # Restore transformation
@@ -386,11 +411,38 @@ class LLaDAGUINew(QMainWindow):
 
         # Token Shape Selection
         self.token_shape_combo = QComboBox()
-        self.token_shape_combo.addItems(["Circle", "Square", "Triangle"])
+        self.token_shape_combo.addItems(["Circle", "Square", "Triangle", "Line"]) # Added "Line" shape
         self.token_shape_combo.setCurrentText("Circle") # Default shape
         self.token_shape_combo.currentTextChanged.connect(self.opengl_viz_widget.set_token_shape)
         viz_settings_layout.addWidget(QLabel("Token Shape:"), 2, 0)
         viz_settings_layout.addWidget(self.token_shape_combo, 2, 1)
+
+        # Animation Speed Control
+        self.animation_speed_spin = QDoubleSpinBox()
+        self.animation_speed_spin.setRange(0.001, 0.1) # Example range
+        self.animation_speed_spin.setValue(0.01) # Default speed
+        self.animation_speed_spin.setSingleStep(0.005)
+        self.animation_speed_spin.valueChanged.connect(self.opengl_viz_widget.set_animation_speed)
+        viz_settings_layout.addWidget(QLabel("Animation Speed:"), 3, 0)
+        viz_settings_layout.addWidget(self.animation_speed_spin, 3, 1)
+
+        # Token Size Control
+        self.token_size_spin = QDoubleSpinBox()
+        self.token_size_spin.setRange(0.01, 0.1)
+        self.token_size_spin.setValue(0.03)
+        self.token_size_spin.setSingleStep(0.005)
+        self.token_size_spin.valueChanged.connect(self.opengl_viz_widget.set_token_size)
+        viz_settings_layout.addWidget(QLabel("Token Size:"), 4, 0)
+        viz_settings_layout.addWidget(self.token_size_spin, 4, 1)
+
+        # Token Spacing Control
+        self.token_spacing_spin = QDoubleSpinBox()
+        self.token_spacing_spin.setRange(0.01, 0.2)
+        self.token_spacing_spin.setValue(0.07)
+        self.token_spacing_spin.setSingleStep(0.01)
+        self.token_spacing_spin.valueChanged.connect(self.opengl_viz_widget.set_token_spacing)
+        viz_settings_layout.addWidget(QLabel("Token Spacing:"), 5, 0)
+        viz_settings_layout.addWidget(self.token_spacing_spin, 5, 1)
 
 
         viz_settings_group.setLayout(viz_settings_layout)
