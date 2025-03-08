@@ -49,6 +49,7 @@ class GLVisualizationWidget(QOpenGLWidget):
         self.zoom_level = 1.0 # Default zoom level
         self.pan_x = 0.0 # Default pan X
         self.pan_y = 0.0 # Default pan Y
+        self.setMouseTracking(True) # Enable mouse tracking for events even when no button is pressed
 
 
     def set_visualization_type(self, viz_type):
@@ -274,13 +275,14 @@ class GLVisualizationWidget(QOpenGLWidget):
 
     def wheelEvent(self, event):
         """Handle mouse wheel event for zoom."""
-        zoom_factor = 0.05 # Zoom sensitivity
+        zoom_factor = 0.15 # Zoom sensitivity - increased for more effect
         delta = event.angleDelta().y()
         if delta > 0: # Zoom in
             self.zoom_level *= (1.0 - zoom_factor)
         elif delta < 0: # Zoom out
             self.zoom_level *= (1.0 + zoom_factor)
         self.zoom_level = max(0.1, min(self.zoom_level, 5.0)) # Clamp zoom level
+        self.zoom_level_spin.setValue(self.zoom_level) # Update spinbox to reflect zoom
         self.update() # Trigger repaint
 
 
@@ -523,12 +525,12 @@ class LLaDAGUINew(QMainWindow):
         viz_settings_layout.addWidget(QLabel("Token Spacing:"), 5, 0)
         viz_settings_layout.addWidget(self.token_spacing_spin, 5, 1)
 
-        # Zoom Level Control - Example for future zoom control
+        # Zoom Level Control
         self.zoom_level_spin = QDoubleSpinBox()
         self.zoom_level_spin.setRange(0.1, 5.0)
         self.zoom_level_spin.setValue(1.0)
         self.zoom_level_spin.setSingleStep(0.1)
-        self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level)
+        self.zoom_level_spin.valueChanged.connect(self.opengl_viz_widget.set_zoom_level) # Connect zoom spinbox
         viz_settings_layout.addWidget(QLabel("Zoom Level:"), 6, 0)
         viz_settings_layout.addWidget(self.zoom_level_spin, 6, 1)
 
