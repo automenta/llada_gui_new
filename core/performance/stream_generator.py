@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class StreamGenerator:
     """
     Stream generator for progressive output.
-    
+
     This class wraps LLaDA's generation process to provide streaming output,
     where partial results are displayed as they become available.
     """
@@ -27,7 +27,7 @@ class StreamGenerator:
     def __init__(self, model=None, tokenizer=None, update_interval=0.1):
         """
         Initialize the stream generator.
-        
+
         Args:
             model: LLaDA model (can be set later)
             tokenizer: LLaDA tokenizer (can be set later)
@@ -43,7 +43,7 @@ class StreamGenerator:
     def set_model(self, model, tokenizer):
         """
         Set or update the model and tokenizer.
-        
+
         Args:
             model: LLaDA model
             tokenizer: LLaDA tokenizer
@@ -64,12 +64,12 @@ class StreamGenerator:
     def stream_generate(self, prompt, config, callback=None):
         """
         Generate text with streaming output.
-        
+
         Args:
             prompt: Input prompt text
             config: Generation configuration
             callback: Callback function for updates (progress, status, data)
-            
+
         Returns:
             str: Generated text
         """

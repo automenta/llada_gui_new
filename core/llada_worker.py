@@ -13,9 +13,13 @@ import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 from transformers import AutoTokenizer, AutoModel
 
-from core.generate import generate, generateOfficial  # Import from our optimized generate.py
+from core.generate import generate  # Import from our optimized generate.py
 from core.generation_mode import GenerationMode  # Import GenerationMode Enum
 from core.utils import cleanup_gpu_memory, get_device_status, get_model_path, format_error
+
+
+torch._dynamo.config.cache_size_limit = 64  # Default is 8
+#torch._dynamo.config.suppress_errors = True
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -242,18 +246,18 @@ class LLaDAWorker(QThread):
             self.step_confidences = [] # Initialize step_confidences list here
 
             # Generate text
-            # out, step_confidences_tensor = generate( # Capture step_confidences
-            #     model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
-            #     block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
-            #     remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
-            #     mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size
-            # )
-            out, step_confidences_tensor = generateOfficial(  # Capture step_confidences
+            out, step_confidences_tensor = generate( # Capture step_confidences
                 model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
                 block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
-                remasking=remasking, progress_callback=self.update_progress,
-                mask_id=self.mask_id
+                remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
+                mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size
             )
+            # out, step_confidences_tensor = generateOfficial(  # Capture step_confidences
+            #     model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
+            #     block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
+            #     remasking=remasking, progress_callback=self.update_progress,
+            #     mask_id=self.mask_id
+            # )
 
             self.step_confidences = [step_confidences_tensor[i, :, :] for i in range(step_confidences_tensor.shape[0])] # Store step confidences
 
@@ -332,6 +336,9 @@ class LLaDAWorker(QThread):
 
             if device == 'cpu':
                 model = model.to('cpu')
+
+            #model = torch.compile(model, mode='reduce-overhead', backend='inductor', dynamic=True)
+
             model.eval() # Ensure eval mode
 
             self.progress.emit(25, "Model loaded successfully", {})

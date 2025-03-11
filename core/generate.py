@@ -21,6 +21,7 @@ from torch import topk, cuda, stack, bool, log, chunk, no_grad, long, zeros_like
     full
 
 logger = logging.getLogger(__name__)
+
 torch._dynamo.config.capture_scalar_outputs = True
 
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
@@ -160,8 +161,6 @@ def _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index):
     else:
         return chunk_processing(model, x, chunk_size=chunk_size)
 
-
-
 def apply_memory_guidance(logits, x, memory_integration, mask_index):
     """
     Apply memory guidance to adjust logits based on external memory.
@@ -229,9 +228,37 @@ def select_tokens_to_transfer(confidence, mask_index, num_transfer_tokens, step)
     return transfer_index
 
 
+def get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, x):
+    logits = _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
+    logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
+    return logits
 
+@torch.compile
+def remaskConf(logits: Tensor, temperature: float, x0: Tensor) -> Tensor:
+    p = F.softmax(logits / temperature if temperature > 0 else logits,
+                  dim=-1)  # Apply temperature scaling to logits before softmax, or if temperature is <=0, use standard softmax
+    return gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
+def logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, remasking,
+                temperature, x):
 
+    # Model processing and guidance
+    logits = get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index,
+                              x)
+
+    if temperature > 0:
+        logits = add_gumbel_noise(logits, temperature, EPSILON)
+
+    x0 = argmax(logits, dim=-1)
+
+    # Compute confidence for remasking
+    if remasking == 'low_confidence':
+        x0_p = remaskConf(logits, temperature, x0)
+    elif remasking == 'random':
+        x0_p = rand_like(x0, device=x0.device)
+    else:
+        raise NotImplementedError(f"Unsupported remasking strategy: {remasking}")
+    return x0, x0_p
 
 
 def generateStep(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
@@ -239,38 +266,6 @@ def generateStep(model, x, cfg_scale, chunk_size, mask_id, prompt_index,
                  num_transfer_tokens, block_start, block_end, mask_index) -> tuple[Tensor, Tensor, Tensor]:
     """Inner iteration of generate"""
 
-    def logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, remasking,
-                    temperature, x):
-
-        def get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index, x):
-            logits = _get_model_logits(model, x, cfg_scale, chunk_size, mask_id, prompt_index)
-            logits = apply_memory_guidance(logits, x, memory_integration, mask_index)
-            return logits
-
-        @torch.compile
-        def remaskConf(logits: Tensor, temperature: float, x0: Tensor) -> Tensor:
-            p = F.softmax(logits / temperature if temperature > 0 else logits,
-                          dim=-1)  # Apply temperature scaling to logits before softmax, or if temperature is <=0, use standard softmax
-            return gather(p, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
-
-
-        # Model processing and guidance
-        logits = get_model_logits(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index,
-                                  x)
-
-        if temperature > 0:
-            logits = add_gumbel_noise(logits, temperature, EPSILON)
-
-        x0 = argmax(logits, dim=-1)
-
-        # Compute confidence for remasking
-        if remasking == 'low_confidence':
-            x0_p = remaskConf(logits, temperature, x0)
-        elif remasking == 'random':
-            x0_p = rand_like(x0, device=x0.device)
-        else:
-            raise NotImplementedError(f"Unsupported remasking strategy: {remasking}")
-        return x0, x0_p
 
     x0, x0_p = logitSample(cfg_scale, chunk_size, mask_id, mask_index, memory_integration, model, prompt_index,
                            remasking, temperature, x)
@@ -329,7 +324,6 @@ def generate(
     def gpu_offload_to_cpu(token_buffer):
         token_buffer.to_cpu()
         cuda.empty_cache()
-
 
     model.eval()
 
@@ -436,6 +430,8 @@ def generateOfficial(model, prompt, steps=128, gen_length=128, block_length=128,
              cfg_scale=0., remasking='low_confidence', mask_id=126336,
      progress_callback: Optional[Callable[[float, Tensor], None]] = None,
      ):
+
+    """From LLaDa https://github.com/ML-GSAI/LLaDA """
 
     def add_gumbel_noise(logits, temperature):
         '''
