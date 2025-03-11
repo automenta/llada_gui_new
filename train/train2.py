@@ -18,13 +18,13 @@ from PyQt6.QtWidgets import (
 from torch.utils.data import Dataset, DataLoader
 import pyqtgraph as pg
 
-# Constants
-ASCII_VOCAB_SIZE = 128
+ASCII_VOCAB_SIZE = 256
 MASK_TOKEN_ID = ASCII_VOCAB_SIZE  # Align with embedding size
-SEQ_LEN = 512
-MAX_PLOT_POINTS = 1000
+SEQ_LEN = 96
+NUM_DIFFUSION_STEPS = SEQ_LEN*2
+
+MAX_PLOT_POINTS = 500
 MOVING_AVG_WINDOW = 50
-NUM_DIFFUSION_STEPS = SEQ_LEN
 
 # Noise Schedule (Linear Beta Schedule as in DDPM)
 def linear_beta_schedule(num_steps: int, beta_start: float = 0.0001, beta_end: float = 0.02) -> torch.Tensor:
@@ -157,7 +157,7 @@ class TextDataset(Dataset):
         return self.tokens[idx: idx + self.seq_length]
 
 class TextDiffusionModel(nn.Module):
-    def __init__(self, vocab_size: int, d_model: int = 256, nhead: int = 8, num_layers: int = 4):
+    def __init__(self, vocab_size: int, d_model: int = 512, nhead: int = 8, num_layers: int = 4):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
@@ -264,8 +264,10 @@ class TrainerThread(QThread):
 
 
 
-# Main Application
+
 class TextDiffusionTrainerApp(QMainWindow):
+    # TODO download and cache actual datasets
+
     DATASETS = {
         "Predefined": ["WikiText-103", "BookCorpus", "OpenWebText", "C4", "ArXiv", "PubMed", "DailyDialog", "PersonaChat"],
         "Custom": ["Custom"]

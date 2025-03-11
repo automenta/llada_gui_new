@@ -13,7 +13,7 @@ import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 from transformers import AutoTokenizer, AutoModel
 
-from core.generate import generate  # Import from our optimized generate.py
+from core.generate import generate, generateOfficial  # Import from our optimized generate.py
 from core.generation_mode import GenerationMode  # Import GenerationMode Enum
 from core.utils import cleanup_gpu_memory, get_device_status, get_model_path, format_error
 
@@ -223,8 +223,7 @@ class LLaDAWorker(QThread):
             cpu_offload = device == 'cuda' and self.generation_mode == GenerationMode.STANDARD # CPU offload only in STANDARD mode
             adaptive_steps = True
             chunk_size = 256 if self.generation_mode == GenerationMode.FAST else 512
-            confidence_threshold = 0.8 if self.generation_mode == GenerationMode.FAST else 0.9
-
+            confidence_threshold = 0.7 if self.generation_mode == GenerationMode.FAST else 0.9
 
             self.progress.emit(40, f"Starting generation in {self.generation_mode.value} mode (steps: {steps}, length: {gen_length})...", {
                 'prompt_length': input_ids.shape[1],
@@ -232,7 +231,8 @@ class LLaDAWorker(QThread):
                     'gen_length': gen_length, 'steps': steps, 'block_length': block_length,
                     'temperature': temperature, 'cfg_scale': cfg_scale, 'remasking': remasking,
                     'device': device, 'cpu_offload': cpu_offload, 'generation_mode': self.generation_mode.value,
-                    'adaptive_steps': adaptive_steps, 'chunk_size': chunk_size
+                    'adaptive_steps': adaptive_steps, 'chunk_size': chunk_size,
+                    'confidence_threshold': confidence_threshold
                 }
             })
 
@@ -242,12 +242,19 @@ class LLaDAWorker(QThread):
             self.step_confidences = [] # Initialize step_confidences list here
 
             # Generate text
-            out, step_confidences_tensor = generate( # Capture step_confidences
+            # out, step_confidences_tensor = generate( # Capture step_confidences
+            #     model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
+            #     block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
+            #     remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
+            #     mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size
+            # )
+            out, step_confidences_tensor = generateOfficial(  # Capture step_confidences
                 model=model, prompt=input_ids, steps=steps, gen_length=gen_length,
                 block_length=block_length, temperature=temperature, cfg_scale=cfg_scale,
-                remasking=remasking, progress_callback=self.update_progress, cpu_offload=cpu_offload,
-                mask_id=self.mask_id, adaptive_steps=adaptive_steps, chunk_size=chunk_size
+                remasking=remasking, progress_callback=self.update_progress,
+                mask_id=self.mask_id
             )
+
             self.step_confidences = [step_confidences_tensor[i, :, :] for i in range(step_confidences_tensor.shape[0])] # Store step confidences
 
             if self.stopped:
